@@ -195,7 +195,11 @@ async def download_one(
         try:
             async with session.get(
                 url,
-                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
+                # No total timeout: it would include time spent queued for one of the
+                # connector's 5 slots, so large backfills timed out before being sent.
+                timeout=aiohttp.ClientTimeout(
+                    total=None, sock_connect=30, sock_read=REQUEST_TIMEOUT
+                ),
             ) as resp:
 
                 if resp.status == 200:
