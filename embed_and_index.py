@@ -340,6 +340,7 @@ def run(
                 continue
 
             embed_queue.append(chunk)
+            existing_ids.add(chunk["id"])  # skip duplicate lines later in the same file
 
             if len(embed_queue) >= EMBED_BATCH_SIZE:
                 flush_embed_queue()

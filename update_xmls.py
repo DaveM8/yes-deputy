@@ -70,13 +70,14 @@ log = logging.getLogger(__name__)
 
 DATE_RE = re.compile(r'/(\d{4}-\d{2}-\d{2})/')
 
-def find_latest_date(xml_dir: Path) -> date | None:
+def find_latest_date(xml_dir: Path, chamber: str) -> date | None:
     """
-    Scan xml_dir for the most recent date embedded in any file path.
-    Directory structure: .../dail/YYYY-MM-DD/writtens/...
+    Scan the given chamber's subtree for the most recent date embedded in any file path.
+    Directory structure: .../debateRecord/{chamber}/YYYY-MM-DD/writtens/...
+    Scoped per chamber so one chamber's downloads don't advance another's start date.
     """
     latest = None
-    for path in xml_dir.rglob('*.xml'):
+    for path in (xml_dir / "akn" / "ie" / "debateRecord" / chamber).rglob('*.xml'):
         m = DATE_RE.search(str(path))
         if m:
             d = date.fromisoformat(m.group(1))
@@ -353,12 +354,12 @@ def main():
         after = date.fromisoformat(args.from_date)
         log.info(f"Using --from-date: downloading dates after {after}")
     else:
-        latest = find_latest_date(xml_dir)
+        latest = find_latest_date(xml_dir, chamber)
         if latest is None:
-            log.error(f"No XML files found in {xml_dir}. Use --from-date to set a start date.")
+            log.error(f"No {chamber} XML files found in {xml_dir}. Use --from-date to set a start date.")
             sys.exit(1)
         after = latest
-        log.info(f"Latest date in {xml_dir}: {latest}")
+        log.info(f"Latest {chamber} date in {xml_dir}: {latest}")
 
     log.info(f"Checking for new sitting days: {after + timedelta(days=1)} → {up_to}")
 

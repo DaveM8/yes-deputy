@@ -19,7 +19,7 @@ async def embed_query(openai_client: AsyncOpenAI, query: str) -> list[float]:
 def _build_filter(filters: SearchFilters) -> dict | None:
     must_clauses = []
     if filters.house:
-        must_clauses.append({"term": {"house.keyword": filters.house}})
+        must_clauses.append({"term": {"house": filters.house}})
     if filters.year_from or filters.year_to:
         year_range: dict = {}
         if filters.year_from:
