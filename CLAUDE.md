@@ -27,6 +27,8 @@ The primary product is a **human-first research tool** — a specialist search i
 - Auto-save of all composed answers to database
 - Keyboard-first UX — tab navigation, minimal friction
 
+**Implementation status:** none of the sprint features above exist yet. The only query path is `/api/chat`, whose retrieval (`app/retrieval.py`) is pure kNN over embeddings — no BM25/keyword component. `SearchFilters` supports only `house` and `year_from`/`year_to`. There is no table for saved answers in SQLite yet.
+
 #### LLM integration — future phase
 - Add as optional enhancement once the human research tool is solid
 - Display LLM answer alongside (not instead of) human research workspace
@@ -62,7 +64,19 @@ bash start.sh
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2
 ```
 
-Requires a `.env` file (or environment variables) — see `app/config.py` for the full list. Required variables: `OPENAI_API_KEY`, `JWT_SECRET`. Optional but typical: `ES_HOST`, `ES_INDEX`, `ANTHROPIC_API_KEY`, `DB_PATH`.
+Requires a `.env` file (or environment variables) — see `app/config.py` for the full list. Required variables: `OPENAI_API_KEY`, `JWT_SECRET`. Optional but typical: `ES_HOST`, `ES_INDEX`, `ANTHROPIC_API_KEY`, `DB_PATH`. `app/config.py` has its own minimal `.env` loader (no python-dotenv); real environment variables take precedence over `.env` values.
+
+**Production** (see `SETUP.md`): the live site (yesdeputy.com) runs behind nginx as the systemd service `yesdeputy`, from this directory. After code changes: `sudo systemctl restart yesdeputy`; logs via `sudo journalctl -u yesdeputy -f`.
+
+## Nightly incremental pipeline
+
+`run_pipeline.sh` is the end-to-end update job (every step idempotent, logs to `pipeline_logs/`, keeps last 30):
+1. `update_xmls.py --chamber dail`, then `--chamber seanad`
+2. `update_committees.py` — committee debates, saved under `questions_xml/akn/ie/debateRecord/{committee_code}/{date}/debate/mul@/main.xml`
+3. `chunk_for_rag.py --from-date <today−14d> --out chunks_pipeline.jsonl` (14-day overlap catches late-published documents)
+4. `embed_and_index.py` into `ES_INDEX`, credentials sourced from `.env`
+
+`chunk_for_rag.py` derives `house` from AKN FRBRWork metadata, so chunks carry `"Dáil"`, `"Seanad"` or `"Committee"`.
 
 ## Pipeline stages
 
@@ -78,6 +92,9 @@ python update_xmls.py
 
 # Historical backfill — fetch everything since a specific date:
 python update_xmls.py --from-date 2000-01-01
+
+# Seanad instead of Dáil (default --chamber dail); preview without saving:
+python update_xmls.py --chamber seanad --dry-run
 
 # Written answers only, or oral questions only:
 python update_xmls.py --doc-types writtens
@@ -139,7 +156,7 @@ Produces two chunk types per debate section:
 - `answer_text` — prose paragraphs grouped up to `--max-chars`
 - `table` — one chunk per embedded HTML table, with preceding prose prepended as context
 
-Tracks already-chunked files via `chunks.jsonl.seen` sidecar for incremental re-runs.
+`--from-date` restricts to XML files on/after a date. The output file is **overwritten** unless `--append` is passed (the module docstring's mention of a `chunks.jsonl.seen` sidecar is stale — it isn't implemented). Deduplication happens downstream: `embed_and_index.py` skips chunk IDs already in the index.
 
 ### Stage 5 — Embed and index chunks (the index the web app queries)
 ```bash
@@ -214,7 +231,7 @@ The FastAPI app lives in `app/`. It serves a single-page frontend from `static/`
 Two tables: `users` (auth + approval) and `query_log` (daily per-user count). `init_db()` is idempotent and handles the `is_approved` column migration for databases created before approval was added.
 
 ### Static frontend (`static/`)
-`index.html` is the main research interface; `auth.html` is login/register; `admin.html` is the user management panel.
+Plain HTML/JS, no build step. `index.html` + `app.js` are the main research interface (SSE consumer for `/api/chat`); `auth.html` is login/register; `admin.html` is the user management panel (inline JS).
 
 ### SSE event protocol (`/api/chat`)
 The chat endpoint streams Server-Sent Events in this order:
@@ -242,6 +259,14 @@ The web UI (`/admin`) uses the same approve/delete operations via `/api/admin/*`
 ## Tests
 
 There is no test suite. There are no `test_*.py` files in the project.
+
+## Other scripts and repo hygiene
+
+- `download_debates_metadata.py` — per-sitting-day debate metadata from the Oireachtas API → JSONL (`debates_metadata.jsonl`)
+- `scan_anomalies.py` — scans the XML corpus for unhandled elements inside `<speech>`/`<question>` (writes `anomaly_report.*`); run it before changing the parser or chunker
+- `generate_year_samples.py` — renders one random Dáil sitting per year to HTML in `year_samples/` for eyeballing format drift
+
+The working tree contains many untracked Emacs artefacts (`#file#`, `.#file`, `file~`), plus large data files and logs. Ignore them and don't commit them.
 
 ## Key known data facts
 
