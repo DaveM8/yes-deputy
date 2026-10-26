@@ -1,0 +1,46 @@
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ────────────────────────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ── Emacs backups ─────────────────────────────────────────────────────────────
+*~
+\#*\#
+.\#*
+
+# ── Downloaded / generated data (large) ──────────────────────────────────────
+questions_xml/
+questions_json/
+chunks.jsonl
+chunks_recent.jsonl
+chunks.jsonl.seen
+written_answers.parquet
+debates_metadata.jsonl
+download_manifest.jsonl
+year_samples/
+
+# ── User database ─────────────────────────────────────────────────────────────
+data/
+
+# ── Log files ─────────────────────────────────────────────────────────────────
+*.log
+
+# ── Generated reports / CSV exports ──────────────────────────────────────────
+anomaly_report.html
+anomaly_report.json
+answers.csv
+questions.csv
+u_questions.csv
+last_100.csv
+department.csv
+number_of_questions.csv
+oneline.json
+
+# ── Claude Code internal ──────────────────────────────────────────────────────
+.claude/

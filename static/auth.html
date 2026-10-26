@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yes Deputy — Sign in</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="auth-page">
+  <div class="auth-card">
+    <div class="auth-logo">Yes <span>Deputy</span></div>
+    <p class="auth-subtitle">
+      Search the Oireachtas parliamentary record — questions put to ministers
+      and their answers, going back decades.
+    </p>
+
+    <div class="auth-tabs">
+      <div class="auth-tab active" data-tab="login">Sign in</div>
+      <div class="auth-tab" data-tab="register">Create account</div>
+    </div>
+
+    <div id="auth-error" class="auth-error"></div>
+  <div id="auth-pending" class="auth-pending" style="display:none"></div>
+
+    <!-- Login form -->
+    <form class="auth-form" id="login-form" autocomplete="on">
+      <div>
+        <label class="form-label" for="login-email">Email</label>
+        <input class="form-input" id="login-email" type="email"
+               placeholder="you@example.com" autocomplete="email" required>
+      </div>
+      <div>
+        <label class="form-label" for="login-password">Password</label>
+        <input class="form-input" id="login-password" type="password"
+               placeholder="••••••••" autocomplete="current-password" required>
+      </div>
+      <button class="submit-btn" type="submit">Sign in</button>
+    </form>
+
+    <!-- Register form -->
+    <form class="auth-form hidden" id="register-form" autocomplete="on">
+      <div>
+        <label class="form-label" for="reg-email">Email</label>
+        <input class="form-input" id="reg-email" type="email"
+               placeholder="you@example.com" autocomplete="email" required>
+      </div>
+      <div>
+        <label class="form-label" for="reg-password">Password</label>
+        <input class="form-input" id="reg-password" type="password"
+               placeholder="At least 8 characters" autocomplete="new-password" required>
+      </div>
+      <div>
+        <label class="form-label" for="reg-confirm">Confirm password</label>
+        <input class="form-input" id="reg-confirm" type="password"
+               placeholder="••••••••" autocomplete="new-password" required>
+      </div>
+      <button class="submit-btn" type="submit">Create account</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  // If already logged in, go to the app
+  if (localStorage.getItem("jwt_token")) {
+    window.location.replace("/");
+  }
+
+  // Tab switching
+  document.querySelectorAll(".auth-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      const which = tab.dataset.tab;
+      document.getElementById("login-form").classList.toggle("hidden", which !== "login");
+      document.getElementById("register-form").classList.toggle("hidden", which !== "register");
+      hideError();
+    });
+  });
+
+  function showError(msg) {
+    document.getElementById("auth-pending").style.display = "none";
+    const el = document.getElementById("auth-error");
+    el.textContent = msg;
+    el.classList.add("show");
+  }
+
+  function hideError() {
+    document.getElementById("auth-error").classList.remove("show");
+  }
+
+  function showPending(msg) {
+    hideError();
+    const el = document.getElementById("auth-pending");
+    el.textContent = msg;
+    el.style.display = "block";
+    // Hide both forms so user knows they're done
+    document.getElementById("register-form").classList.add("hidden");
+  }
+
+  async function submitAuth(url, body, btn) {
+    hideError();
+    btn.disabled = true;
+    btn.textContent = "Please wait…";
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        showError(data.detail || "Something went wrong");
+        return;
+      }
+      // Register returns {status:"pending"}, login returns {token:"..."}
+      if (data.status === "pending") {
+        showPending(data.message);
+        return;
+      }
+      localStorage.setItem("jwt_token", data.token);
+      const next = new URLSearchParams(window.location.search).get("next");
+      window.location.replace(next || "/");
+    } catch {
+      showError("Network error — please try again");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = url.includes("login") ? "Sign in" : "Create account";
+    }
+  }
+
+  document.getElementById("login-form").addEventListener("submit", e => {
+    e.preventDefault();
+    submitAuth("/api/auth/login", {
+      email: document.getElementById("login-email").value,
+      password: document.getElementById("login-password").value,
+    }, e.submitter);
+  });
+
+  document.getElementById("register-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const pw = document.getElementById("reg-password").value;
+    const confirm = document.getElementById("reg-confirm").value;
+    if (pw !== confirm) { showError("Passwords do not match"); return; }
+    submitAuth("/api/auth/register", {
+      email: document.getElementById("reg-email").value,
+      password: pw,
+    }, e.submitter);
+  });
+</script>
+</body>
+</html>

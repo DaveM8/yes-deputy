@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yes Deputy — Oireachtas Q&A</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-title">Yes <span>Deputy</span></span>
+
+  <select id="model-select" title="Choose LLM model"></select>
+
+  <input
+    id="key-input"
+    type="password"
+    placeholder="Own API key (optional)"
+    autocomplete="off"
+    title="Bring your own API key — removes the daily limit"
+  >
+
+  <span class="quota-badge" id="quota-badge">Loading…</span>
+
+  <div class="filter-pills">
+    <button class="pill active" data-house="">All</button>
+    <button class="pill" data-house="Dáil">Dáil</button>
+    <button class="pill" data-house="Seanad">Seanad</button>
+  </div>
+
+  <div class="year-range">
+    <input type="number" id="year-from" placeholder="From" min="1990" max="2030">
+    <span>–</span>
+    <input type="number" id="year-to" placeholder="To" min="1990" max="2030">
+  </div>
+
+  <div class="user-menu">
+    <span id="user-email" style="font-size:0.78rem;color:var(--text-muted)"></span>
+    <button class="logout-btn" id="logout-btn">Sign out</button>
+  </div>
+</nav>
+
+<div class="main">
+  <!-- Chat panel -->
+  <div class="chat-panel">
+    <div class="messages" id="messages">
+      <div class="message assistant">
+        <div class="avatar">YD</div>
+        <div class="bubble">
+          Ask me anything about Irish parliamentary written answers — questions put to ministers,
+          their responses, policy positions, statistics, and more.<br><br>
+          <em style="color:var(--text-muted)">Try: "What has the housing minister said about HAP payments?" or "How many gardaí were recruited in 2023?"</em>
+        </div>
+      </div>
+    </div>
+    <div class="input-area">
+      <textarea
+        id="chat-input"
+        rows="1"
+        placeholder="Ask a question about the Oireachtas record…"
+      ></textarea>
+      <button id="send-btn" title="Send (Enter)">&#10148;</button>
+    </div>
+  </div>
+
+  <!-- Sources panel -->
+  <div class="sources-panel">
+    <div class="sources-header">
+      Sources
+      <span class="sources-count" id="sources-count">0</span>
+    </div>
+    <div class="sources-list" id="sources-list">
+      <p class="sources-empty">Source documents will appear here as you ask questions.</p>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

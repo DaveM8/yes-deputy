@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yes Deputy — Admin</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* Admin portal — overrides + additions */
+    body { overflow: auto; height: auto; min-height: 100dvh; }
+
+    .admin-wrap {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 20px 16px 48px;
+    }
+
+    /* ── Section headings ── */
+    .section-heading {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 28px 0 10px;
+    }
+
+    /* ── User cards ── */
+    .user-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--card-radius);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .user-card.pending {
+      border-left: 3px solid #f59e0b;
+    }
+
+    .user-info { flex: 1; min-width: 0; }
+
+    .user-email {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .user-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 2px 7px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .badge-pending  { background: #fef3c7; color: #92400e; }
+    .badge-approved { background: var(--dail-bg);  color: var(--dail-green); }
+    .badge-admin    { background: var(--accent-light); color: var(--accent); }
+
+    /* ── Action buttons ── */
+    .user-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+    .btn {
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-approve {
+      background: var(--dail-green);
+      color: #fff;
+    }
+    .btn-approve:hover:not(:disabled) { opacity: 0.88; }
+
+    .btn-delete {
+      background: var(--error-bg);
+      color: var(--error);
+    }
+    .btn-delete:hover:not(:disabled) { background: #fca5a5; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: var(--text);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      z-index: 100;
+      white-space: nowrap;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    #toast.error { background: var(--error); }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      padding: 24px;
+      color: var(--text-muted);
+      font-size: 0.88rem;
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: var(--card-radius);
+    }
+
+    /* ── Loading ── */
+    .loading {
+      text-align: center;
+      padding: 48px;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-title">Yes <span>Deputy</span> — Admin</span>
+  <span id="admin-email" style="font-size:0.82rem;color:var(--text-muted);"></span>
+  <button class="btn btn-delete" onclick="logout()" style="padding:6px 12px;">Log out</button>
+</nav>
+
+<div class="admin-wrap">
+  <div id="loading" class="loading">Loading users…</div>
+  <div id="content" style="display:none;">
+
+    <p class="section-heading">Pending Approval</p>
+    <div id="pending-list"></div>
+
+    <p class="section-heading">All Users</p>
+    <div id="all-list"></div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = '';  // same origin
+
+// ── Auth helpers ──────────────────────────────────────────────────────────
+
+function token() { return localStorage.getItem('jwt_token'); }
+
+function logout() {
+  localStorage.removeItem('jwt_token');
+  location.href = '/login';
+}
+
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + token(),
+      ...(opts.headers || {}),
+    },
+  });
+  if (res.status === 401 || res.status === 403) {
+    logout();
+    throw new Error('Not authorised');
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+
+let _toastTimer;
+function showToast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.toggle('error', isError);
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+
+function badge(user) {
+  if (user.is_admin)    return '<span class="badge badge-admin">Admin</span>';
+  if (!user.is_approved) return '<span class="badge badge-pending">Pending</span>';
+  return '<span class="badge badge-approved">Approved</span>';
+}
+
+function renderCard(user, onAction) {
+  const card = document.createElement('div');
+  card.className = 'user-card' + (user.is_approved ? '' : ' pending');
+  card.id = 'user-' + user.id;
+
+  const canApprove = !user.is_approved;
+  const canDelete  = !user.is_admin;   // protect admins from accidental deletion
+
+  card.innerHTML = `
+    <div class="user-info">
+      <div class="user-email">${escHtml(user.email)}</div>
+      <div class="user-meta">Joined ${user.created_at} &nbsp;${badge(user)}</div>
+    </div>
+    <div class="user-actions">
+      ${canApprove
+        ? `<button class="btn btn-approve" onclick="approveUser(${user.id})">Approve</button>`
+        : ''}
+      ${canDelete
+        ? `<button class="btn btn-delete" onclick="deleteUser(${user.id}, '${escHtml(user.email)}')">Delete</button>`
+        : ''}
+    </div>
+  `;
+  return card;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function renderUsers(users) {
+  const pending = users.filter(u => !u.is_approved && !u.is_admin);
+  const all     = users;
+
+  const pendingEl = document.getElementById('pending-list');
+  const allEl     = document.getElementById('all-list');
+
+  pendingEl.innerHTML = '';
+  allEl.innerHTML = '';
+
+  if (pending.length === 0) {
+    pendingEl.innerHTML = '<div class="empty">No users waiting for approval.</div>';
+  } else {
+    pending.forEach(u => pendingEl.appendChild(renderCard(u)));
+  }
+
+  if (all.length === 0) {
+    allEl.innerHTML = '<div class="empty">No users yet.</div>';
+  } else {
+    all.forEach(u => allEl.appendChild(renderCard(u)));
+  }
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────
+
+async function approveUser(id) {
+  const btns = document.querySelectorAll(`#user-${id} .btn`);
+  btns.forEach(b => b.disabled = true);
+  try {
+    await apiFetch(`/api/admin/users/${id}/approve`, { method: 'POST' });
+    showToast('User approved.');
+    await loadUsers();
+  } catch (e) {
+    showToast(e.message, true);
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
+async function deleteUser(id, email) {
+  if (!confirm(`Delete user "${email}"? This cannot be undone.`)) return;
+  const btns = document.querySelectorAll(`#user-${id} .btn`);
+  btns.forEach(b => b.disabled = true);
+  try {
+    await apiFetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+    showToast('User deleted.');
+    await loadUsers();
+  } catch (e) {
+    showToast(e.message, true);
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+
+async function loadUsers() {
+  const users = await apiFetch('/api/admin/users');
+  renderUsers(users);
+}
+
+async function init() {
+  if (!token()) { location.href = '/login?next=/admin'; return; }
+
+  try {
+    const me = await apiFetch('/api/auth/me');
+    if (!me.is_admin) { location.href = '/'; return; }
+    document.getElementById('admin-email').textContent = me.email;
+  } catch { return; }
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display  = 'block';
+
+  await loadUsers();
+}
+
+init();
+</script>
+</body>
+</html>
