@@ -231,17 +231,26 @@ function renderCard(user, onAction) {
   card.innerHTML = `
     <div class="user-info">
       <div class="user-email">${escHtml(user.email)}</div>
-      <div class="user-meta">Joined ${user.created_at} &nbsp;${badge(user)}</div>
+      <div class="user-meta">Joined ${escHtml(user.created_at)} &nbsp;${badge(user)}</div>
     </div>
-    <div class="user-actions">
-      ${canApprove
-        ? `<button class="btn btn-approve" onclick="approveUser(${user.id})">Approve</button>`
-        : ''}
-      ${canDelete
-        ? `<button class="btn btn-delete" onclick="deleteUser(${user.id}, '${escHtml(user.email)}')">Delete</button>`
-        : ''}
-    </div>
+    <div class="user-actions"></div>
   `;
+
+  const actions = card.querySelector('.user-actions');
+  if (canApprove) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-approve';
+    btn.textContent = 'Approve';
+    btn.addEventListener('click', () => approveUser(user.id));
+    actions.appendChild(btn);
+  }
+  if (canDelete) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-delete';
+    btn.textContent = 'Delete';
+    btn.addEventListener('click', () => deleteUser(user.id, user.email));
+    actions.appendChild(btn);
+  }
   return card;
 }
 

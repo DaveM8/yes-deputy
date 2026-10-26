@@ -123,7 +123,16 @@
       }
       localStorage.setItem("jwt_token", data.token);
       const next = new URLSearchParams(window.location.search).get("next");
-      window.location.replace(next || "/");
+      let safe = "/";
+      if (next) {
+        try {
+          const u = new URL(next, window.location.origin);
+          if (u.origin === window.location.origin && !u.pathname.startsWith("//")) {
+            safe = u.href;
+          }
+        } catch {}
+      }
+      window.location.replace(safe);
     } catch {
       showError("Network error — please try again");
     } finally {

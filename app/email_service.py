@@ -5,6 +5,7 @@ No extra dependencies required.
 from __future__ import annotations
 
 import asyncio
+import html as html_lib
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -61,6 +62,8 @@ async def notify_admin_new_user(user_email: str) -> None:
         return
 
     portal_url = (settings.site_url.rstrip("/") + "/admin") if settings.site_url else "/admin"
+    safe_email = html_lib.escape(user_email, quote=True)
+    safe_portal_url = html_lib.escape(portal_url, quote=True)
 
     subject = f"[Yes Deputy] New user awaiting approval: {user_email}"
 
@@ -89,11 +92,11 @@ async def notify_admin_new_user(user_email: str) -> None:
                    white-space: nowrap; width: 1%;">Email</td>
         <td style="padding: 10px 12px; border: 1px solid #dde1ef; border-left: none;
                    font-size: 0.9rem; color: #1a1d2e; border-radius: 0 6px 6px 0;">
-          {user_email}
+          {safe_email}
         </td>
       </tr>
     </table>
-    <a href="{portal_url}"
+    <a href="{safe_portal_url}"
        style="display: inline-block; padding: 12px 28px; background: #4f46e5;
               color: #fff; text-decoration: none; border-radius: 7px;
               font-weight: 700; font-size: 0.95rem; letter-spacing: -0.01em;">
