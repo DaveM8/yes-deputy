@@ -152,15 +152,17 @@ async def _chat_generator(
             token_count += 1
             yield _sse_event("token", {"text": token})
     except Exception as exc:
-        # A partial answer still counts; a call that produced nothing doesn't.
-        # A client disconnect raises CancelledError, which isn't caught here,
-        # so an abandoned query stays counted.
-        if token_count == 0:
+        # A partial answer still counts; a call on our key that produced nothing
+        # doesn't. An own-key query stays counted once retrieval has run, or a
+        # fake key would get unlimited searches on our OpenAI key. A client
+        # disconnect raises CancelledError, which isn't caught here, so an
+        # abandoned query stays counted too.
+        if token_count == 0 and quota == "free":
             refund_query(settings.db_path, user["id"], log_date, quota=quota)
         yield _sse_event("error", {"message": f"LLM error: {exc}"})
         return
 
-    if token_count == 0:
+    if token_count == 0 and quota == "free":
         refund_query(settings.db_path, user["id"], log_date, quota=quota)
         used -= 1
     if quota == "free":
