@@ -27,7 +27,7 @@ class SearchFilters(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
     history: list[ChatMessage] = Field(default_factory=list, max_length=MAX_HISTORY_MESSAGES)
-    model_key: str = Field(default="claude-haiku", max_length=50)
+    model_key: str = Field(default="deepseek-flash", max_length=50)
     api_key: str | None = Field(default=None, max_length=500)  # BYOK — never stored server-side
     filters: SearchFilters = Field(default_factory=SearchFilters)
 

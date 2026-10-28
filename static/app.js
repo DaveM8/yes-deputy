@@ -16,6 +16,11 @@ const chatInput    = document.getElementById("chat-input");
 const sendBtn      = document.getElementById("send-btn");
 const sourcesList  = document.getElementById("sources-list");
 const sourcesCount = document.getElementById("sources-count");
+const sourcesCountTab = document.getElementById("sources-count-tab");
+const mainEl       = document.getElementById("main");
+const keyHint      = document.getElementById("key-hint");
+const settingsBtn  = document.getElementById("settings-btn");
+const navSettings  = document.getElementById("nav-settings");
 const modelSelect  = document.getElementById("model-select");
 const keyInput     = document.getElementById("key-input");
 const yearFrom     = document.getElementById("year-from");
@@ -69,28 +74,25 @@ async function init() {
     return;
   }
 
-  // Populate model dropdown
+  // Populate model dropdown. "paid" models need the user's own key.
   try {
     const health = await healthResp.json();
     for (const m of health.models) {
+      models[m.key] = m;
       const opt = document.createElement("option");
       opt.value = m.key;
-      opt.textContent = m.display_name;
+      opt.textContent = m.tier === "paid" ? `${m.display_name} (own key)` : m.display_name;
       modelSelect.appendChild(opt);
     }
+    const firstFree = health.models.find(m => m.tier === "free");
+    if (firstFree) modelSelect.value = firstFree.key;
   } catch {
-    for (const [key, name] of [
-      ["claude-haiku", "Claude Haiku (fast)"],
-      ["claude-sonnet", "Claude Sonnet (best)"],
-      ["gpt-4o-mini", "GPT-4o Mini (fast)"],
-      ["gpt-4o", "GPT-4o (best)"],
-    ]) {
-      const opt = document.createElement("option");
-      opt.value = key;
-      opt.textContent = name;
-      modelSelect.appendChild(opt);
-    }
+    const opt = document.createElement("option");
+    opt.value = "claude-haiku";
+    opt.textContent = "Claude Haiku (fast)";
+    modelSelect.appendChild(opt);
   }
+  updateKeyHint();
 
   // Show user info + quota
   try {
@@ -109,8 +111,24 @@ async function init() {
   } catch { /* ignore */ }
 }
 
-// ── BYOK key ───────────────────────────────────────────────────────────────
+// ── Model choice and BYOK key ──────────────────────────────────────────────
+const models = {};  // key -> {display_name, tier, provider} from /api/health
+const PROVIDER_NAMES = { claude: "Anthropic", openai: "OpenAI", deepseek: "DeepSeek", kimi: "Kimi" };
+
+function updateKeyHint() {
+  const m = models[modelSelect.value];
+  if (!m) return;
+  const name = PROVIDER_NAMES[m.provider] || m.provider;
+  keyInput.placeholder = m.tier === "paid" ? `Your ${name} API key` : `Own ${name} key (optional)`;
+  const needsKey = m.tier === "paid" && !keyInput.value.trim();
+  keyHint.textContent = needsKey ? `${m.display_name} needs your own ${name} key.` : "";
+  keyHint.hidden = !needsKey;
+}
+
+modelSelect.addEventListener("change", updateKeyHint);
+
 keyInput.addEventListener("input", () => {
+  updateKeyHint();
   const v = keyInput.value.trim();
   if (v) sessionStorage.setItem("byok_key", v);
   else sessionStorage.removeItem("byok_key");
@@ -135,6 +153,26 @@ document.querySelectorAll(".pill[data-house]").forEach(btn => {
     btn.classList.add("active");
   });
 });
+
+// ── Phones: settings panel and Chat | Sources switcher ─────────────────────
+settingsBtn.addEventListener("click", () => {
+  const open = navSettings.classList.toggle("open");
+  settingsBtn.setAttribute("aria-expanded", String(open));
+});
+
+function showView(view) {
+  mainEl.dataset.view = view;
+  document.querySelectorAll(".view-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.view === view));
+}
+
+document.querySelectorAll(".view-btn").forEach(btn => {
+  btn.addEventListener("click", () => showView(btn.dataset.view));
+});
+
+function isPhoneLayout() {
+  return window.matchMedia("(max-width: 768px)").matches;
+}
 
 function getActiveHouse() {
   const active = document.querySelector(".pill[data-house].active");
@@ -185,15 +223,26 @@ function appendError(message) {
 }
 
 // ── Source card rendering ──────────────────────────────────────────────────
+function setSourcesCount(text) {
+  sourcesCount.textContent = text;
+  sourcesCountTab.textContent = text;
+}
+
 function renderSourceCards(cards) {
   sourcesList.replaceChildren();
-  sourcesCount.textContent = cards.length;
+  setSourcesCount(cards.length);
+  if (cards.length && mainEl.dataset.view === "chat") {
+    sourcesCountTab.classList.remove("pulse");
+    void sourcesCountTab.offsetWidth;  // restart the animation
+    sourcesCountTab.classList.add("pulse");
+  }
   if (!cards.length) {
     setSourcesEmpty("No relevant sources found.");
     return;
   }
   cards.forEach((card, i) => {
     const el = buildSourceCard(card, i + 1);
+    el.dataset.n = i + 1;
     el.style.animationDelay = `${i * 40}ms`;
     sourcesList.appendChild(el);
   });
@@ -270,8 +319,17 @@ function buildSourceCard(card, n) {
   el.appendChild(header);
   el.appendChild(heading);
   el.appendChild(minister);
+  const fullText = document.createElement("a");
+  fullText.className = "card-link";
+  fullText.href = `/source/${encodeURIComponent(card.chunk_id)}`;
+  fullText.target = "_blank";
+  fullText.rel = "noopener";
+  fullText.textContent = "Read full text ↗";
+  fullText.addEventListener("click", e => e.stopPropagation());
+
   el.appendChild(excerpt);
   if (card.excerpt && card.excerpt.length >= 295) el.appendChild(showMore);
+  el.appendChild(fullText);
   el.appendChild(bar);
   return el;
 }
@@ -327,6 +385,7 @@ async function streamChat(userText, bubble) {
         try {
           const obj = JSON.parse(raw);
           if (currentEvent === "sources") {
+            bubble._cards = obj;  // citations in this answer refer to these cards
             renderSourceCards(obj);
           } else if (currentEvent === "token") {
             assistantText += obj.text;
@@ -352,10 +411,78 @@ async function streamChat(userText, bubble) {
   if (assistantText) {
     bubble.innerHTML = DOMPurify.sanitize(marked.parse(assistantText));
     bubble.classList.add("rendered");
+    wrapTables(bubble);
+    linkCitations(bubble);
   }
 
   return assistantText;
 }
+
+// ── Answer post-processing ─────────────────────────────────────────────────
+function wrapTables(root) {
+  for (const table of root.querySelectorAll("table")) {
+    const wrap = document.createElement("div");
+    wrap.className = "table-scroll";
+    table.replaceWith(wrap);
+    wrap.appendChild(table);
+  }
+}
+
+// "Source 3", "Sources 2 and 5", "Sources 1, 4 & 6": the number(s) become links
+const CITE_RE = /\bSources?\s+\d+(?:(?:\s*,\s*|\s+(?:and|&)\s+)\d+)*/g;
+
+function linkCitations(root) {
+  // Collect first: replacing nodes while walking would confuse the walker
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (!node.parentElement.closest("a, code, pre")) nodes.push(node);
+  }
+  for (const node of nodes) {
+    const text = node.nodeValue;
+    CITE_RE.lastIndex = 0;
+    if (!CITE_RE.test(text)) continue;
+    CITE_RE.lastIndex = 0;
+
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const match of text.matchAll(CITE_RE)) {
+      frag.append(text.slice(last, match.index));
+      // Within the match, link each number; keep the words and separators as text
+      let pos = 0;
+      for (const num of match[0].matchAll(/\d+/g)) {
+        frag.append(match[0].slice(pos, num.index));
+        const a = document.createElement("a");
+        a.className = "cite";
+        a.href = "#";
+        a.dataset.n = num[0];
+        a.textContent = num[0];
+        frag.append(a);
+        pos = num.index + num[0].length;
+      }
+      frag.append(match[0].slice(pos));
+      last = match.index + match[0].length;
+    }
+    frag.append(text.slice(last));
+    node.replaceWith(frag);
+  }
+}
+
+// One listener for all citation links, in old and new answers
+messagesEl.addEventListener("click", e => {
+  const a = e.target.closest("a.cite");
+  if (!a) return;
+  e.preventDefault();
+  const bubble = a.closest(".bubble");
+  if (bubble && bubble._cards) renderSourceCards(bubble._cards);
+  if (isPhoneLayout()) showView("sources");
+  const card = sourcesList.querySelector(`.source-card[data-n="${a.dataset.n}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  card.classList.add("highlight");
+  setTimeout(() => card.classList.remove("highlight"), 1800);
+});
 
 // ── Main send handler ──────────────────────────────────────────────────────
 async function handleSend() {
@@ -372,7 +499,7 @@ async function handleSend() {
   bubble.classList.add("streaming");
 
   setSourcesEmpty("Searching…");
-  sourcesCount.textContent = "…";
+  setSourcesCount("…");
 
   try {
     const assistantText = await streamChat(text, bubble);
@@ -387,7 +514,7 @@ async function handleSend() {
     bubble.textContent = "";
     appendError(err.message || "Request failed");
     setSourcesEmpty("No sources loaded.");
-    sourcesCount.textContent = "0";
+    setSourcesCount("0");
   } finally {
     state.streaming = false;
     sendBtn.disabled = false;

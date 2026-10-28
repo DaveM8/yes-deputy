@@ -227,11 +227,13 @@ The FastAPI app lives in `app/`. It serves a single-page frontend from `static/`
 6. LLM streaming (`app/llm/`) — each token yielded as an SSE `token` event
 7. `done` event with remaining quota sent on completion
 
+`GET /api/sources/{chunk_id}?before=3&after=3` (`app/routers/sources.py`, login required) returns one chunk's full text plus neighbouring chunks of the same section (IDs recomputed with the `make_chunk_id` formula, fetched with one `mget`) and an `oireachtas_url`. `/source/{chunk_id}` serves `static/source.html`, which renders it.
+
 ### LLM provider abstraction (`app/llm/`)
 - `base.py` defines the `LLMProvider` ABC with `stream_chat()`
-- `claude.py` and `openai_provider.py` are concrete implementations
-- `registry.py` maps string keys (`"claude-haiku"`, `"claude-sonnet"`, `"gpt-4o-mini"`, `"gpt-4o"`) to `ModelInfo` + provider singletons
-- BYOK: callers can pass their own API key in `ChatRequest.api_key`; it is never stored
+- `claude.py` and `openai_provider.py` are concrete implementations. `OpenAIProvider(base_url, extra_body=..., min_max_tokens=...)` also serves DeepSeek (`https://api.deepseek.com`, thinking disabled) and Kimi (`https://api.moonshot.ai/v1`, `reasoning_effort: low`), which use the OpenAI API format.
+- `registry.py` maps string keys (`"deepseek-flash"` (default), `"claude-haiku"`, `"gpt-4o-mini"`, `"claude-sonnet"`, `"gpt-4o"`, `"kimi-k3"`) to `ModelInfo` + provider singletons. `effective_tier()` treats a `"free"` model whose provider has no server key (`DEEPSEEK_API_KEY`, `KIMI_API_KEY`, …) as `"paid"`, i.e. own-key only; `/api/health` reports that effective tier.
+- BYOK: callers can pass their own API key in `ChatRequest.api_key`; it is never stored. It is used only for the LLM call; retrieval always uses the server's OpenAI key. `_check_key_matches` rejects an Anthropic key (`sk-ant-`) on a non-Claude model and vice versa, before a query is reserved.
 
 ### Authentication model
 - New users register → `is_approved=0`; admin must approve before they can use the app
@@ -242,7 +244,9 @@ The FastAPI app lives in `app/`. It serves a single-page frontend from `static/`
 Two tables: `users` (auth + approval) and `query_log` (daily per-user count). `init_db()` is idempotent and handles the `is_approved` column migration for databases created before approval was added.
 
 ### Static frontend (`static/`)
-Plain HTML/JS, no build step. `index.html` + `app.js` are the main research interface (SSE consumer for `/api/chat`); `auth.html` is login/register; `admin.html` is the user management panel (inline JS).
+Plain HTML/JS, no build step. `index.html` + `app.js` are the main research interface (SSE consumer for `/api/chat`); `auth.html` is login/register; `admin.html` is the user management panel (inline JS); `source.html` + `source.js` is the full-text page opened from a card's "Read full text ↗".
+
+Each answer bubble keeps its own source cards (`bubble._cards`). "Source 3" in a rendered answer becomes an `a.cite` link that re-shows that answer's cards and highlights card 3. At ≤768 px the nav controls fold into a Settings panel and a Chat | Sources switcher (`.main[data-view]`) shows one panel at a time.
 
 ### SSE event protocol (`/api/chat`)
 The chat endpoint streams Server-Sent Events in this order:

@@ -15,6 +15,12 @@
 <nav class="nav">
   <span class="nav-title">Yes <span>Deputy</span></span>
 
+  <button class="settings-btn" id="settings-btn" aria-expanded="false" aria-controls="nav-settings">
+    ⚙ Settings
+  </button>
+
+  <!-- On phones this collapses behind the Settings button; on desktop it's part of the nav row -->
+  <div class="nav-settings" id="nav-settings">
   <select id="model-select" title="Choose LLM model"></select>
 
   <input
@@ -22,8 +28,9 @@
     type="password"
     placeholder="Own API key (optional)"
     autocomplete="off"
-    title="Bring your own API key — removes the daily limit"
+    title="Bring your own API key for the selected model"
   >
+  <span class="key-hint" id="key-hint" hidden></span>
 
   <span class="quota-badge" id="quota-badge">Loading…</span>
 
@@ -44,18 +51,27 @@
     <span id="user-email" style="font-size:0.78rem;color:var(--text-muted)"></span>
     <button class="logout-btn" id="logout-btn">Sign out</button>
   </div>
+  </div>
 </nav>
 
-<div class="main">
+<!-- Phones only: switch between the chat and the sources panel -->
+<div class="view-switch" role="tablist">
+  <button class="view-btn active" data-view="chat" role="tab">Chat</button>
+  <button class="view-btn" data-view="sources" role="tab">
+    Sources <span class="sources-count" id="sources-count-tab">0</span>
+  </button>
+</div>
+
+<div class="main" id="main" data-view="chat">
   <!-- Chat panel -->
   <div class="chat-panel">
     <div class="messages" id="messages">
       <div class="message assistant">
         <div class="avatar">YD</div>
         <div class="bubble">
-          Ask me anything about Irish parliamentary written answers — questions put to ministers,
-          their responses, policy positions, statistics, and more.<br><br>
-          <em style="color:var(--text-muted)">Try: "What has the housing minister said about HAP payments?" or "How many gardaí were recruited in 2023?"</em>
+          Ask me anything about the Oireachtas record since 1919: Dáil and Seanad debates,
+          committee hearings, and parliamentary questions with ministers' answers.<br><br>
+          <em style="color:var(--text-muted)">Try: "When did Micheál Martin last speak in the Dáil?" or "What did committees hear about rural broadband?"</em>
         </div>
       </div>
     </div>

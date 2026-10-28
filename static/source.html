@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Source — Yes Deputy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="source-page">
+
+<nav class="nav">
+  <a class="nav-title" href="/">Yes <span>Deputy</span></a>
+</nav>
+
+<main class="source-main">
+  <p class="sources-empty" id="status">Loading…</p>
+
+  <header class="source-head" id="head" hidden>
+    <div class="card-header">
+      <span class="house-badge" id="house"></span>
+      <span class="date-chip" id="date"></span>
+      <span class="table-badge" id="table-badge" hidden>TABLE</span>
+    </div>
+    <h1 class="source-heading" id="heading"></h1>
+    <p class="card-minister" id="person"></p>
+    <ul class="source-questions" id="questions" hidden></ul>
+    <a class="source-link" id="oireachtas-link" target="_blank" rel="noopener" hidden>
+      View on oireachtas.ie ↗
+    </a>
+  </header>
+
+  <button class="context-btn" id="earlier" hidden>Show earlier</button>
+  <div class="source-passages" id="passages"></div>
+  <button class="context-btn" id="later" hidden>Show later</button>
+</main>
+
+<script type="module" src="/static/source.js"></script>
+</body>
+</html>

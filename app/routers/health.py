@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from app.config import settings
-from app.llm.registry import MODEL_REGISTRY
+from app.llm.registry import MODEL_REGISTRY, effective_tier
 
 router = APIRouter()
 
@@ -24,7 +24,8 @@ async def health(request: Request) -> dict:
         {
             "key": key,
             "display_name": info.display_name,
-            "tier": info.tier,
+            # "paid" = needs the user's own key (including free models with no server key)
+            "tier": effective_tier(info, settings),
             "provider": info.provider,
         }
         for key, info in MODEL_REGISTRY.items()

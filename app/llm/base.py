@@ -6,7 +6,7 @@ from typing import AsyncIterator, Protocol, runtime_checkable
 
 @dataclass
 class ModelInfo:
-    provider: str       # "claude" | "openai"
+    provider: str       # "claude" | "openai" | "deepseek" | "kimi"
     model_id: str       # exact API model identifier
     tier: str           # "free" | "paid"
     display_name: str   # shown in the UI dropdown

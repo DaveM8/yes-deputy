@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from app.auth import get_current_user
 from app.database import refund_query, reserve_query
-from app.llm.registry import get_provider_for_model
+from app.llm.registry import effective_tier, get_provider_for_model, server_key
 from app.models import ChatRequest, SearchFilters, SourceCard
 from app.prompt import build_messages, build_system_prompt
 from app.retrieval import retrieve, wants_recent
@@ -52,10 +52,30 @@ async def _infer_filters(filters: SearchFilters, query: str, request: Request) -
     return inferred
 
 
+_PROVIDER_NAMES = {"claude": "Anthropic", "openai": "OpenAI", "deepseek": "DeepSeek", "kimi": "Kimi"}
+
+
+def _check_key_matches(request_key: str, provider: str) -> None:
+    """
+    Catch the common mix-up of an Anthropic key with another provider's model
+    (or the reverse) before a query is used up. Anthropic keys start "sk-ant-";
+    OpenAI, DeepSeek and Kimi keys all start "sk-", so those can't be told apart.
+    """
+    is_anthropic = request_key.startswith("sk-ant-")
+    if is_anthropic and provider != "claude":
+        raise ValueError(
+            "That looks like an Anthropic key. Choose a Claude model, "
+            f"or enter a {_PROVIDER_NAMES[provider]} key."
+        )
+    if not is_anthropic and provider == "claude":
+        raise ValueError("Claude models need an Anthropic key (it starts with sk-ant-).")
+
+
 def _resolve_api_key(request_key: str | None, provider: str, settings) -> str:
     if request_key:
+        _check_key_matches(request_key, provider)
         return request_key
-    key = settings.anthropic_api_key if provider == "claude" else settings.openai_api_key
+    key = server_key(provider, settings)
     if not key:
         raise ValueError(
             f"No API key available for provider '{provider}'. "
@@ -79,7 +99,8 @@ async def _chat_generator(
         yield _sse_event("error", {"message": str(exc)})
         return
 
-    if model_info.tier == "paid" and not chat_req.api_key and not user["is_admin"]:
+    if (effective_tier(model_info, settings) == "paid"
+            and not chat_req.api_key and not user["is_admin"]):
         yield _sse_event("error", {
             "message": f"{model_info.display_name} needs your own API key. "
                        "Add one in the settings, or choose a free model.",

@@ -29,6 +29,8 @@ class Settings:
     es_index: str
     openai_api_key: str
     anthropic_api_key: str | None
+    deepseek_api_key: str | None
+    kimi_api_key: str | None
     default_model_key: str
     max_history_turns: int
     retrieval_k: int
@@ -53,7 +55,9 @@ class Settings:
         self.es_index = os.environ.get("ES_INDEX", "oireachtas-chunks")
         self.openai_api_key = os.environ["OPENAI_API_KEY"]
         self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
-        self.default_model_key = os.environ.get("DEFAULT_MODEL_KEY", "claude-haiku")
+        self.deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY")
+        self.kimi_api_key = os.environ.get("KIMI_API_KEY")
+        self.default_model_key = os.environ.get("DEFAULT_MODEL_KEY", "deepseek-flash")
         self.max_history_turns = int(os.environ.get("MAX_HISTORY_TURNS", "6"))
         self.retrieval_k = int(os.environ.get("RETRIEVAL_K", "8"))
         self.retrieval_num_candidates = int(os.environ.get("RETRIEVAL_NUM_CANDIDATES", "100"))

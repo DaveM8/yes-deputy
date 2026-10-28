@@ -14,6 +14,7 @@ from app.routers.admin_router import router as admin_router
 from app.routers.auth_router import router as auth_router
 from app.routers.chat import router as chat_router
 from app.routers.health import router as health_router
+from app.routers.sources import router as sources_router
 from app.retrieval import MemberIndex
 
 
@@ -51,6 +52,7 @@ app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(health_router)
+app.include_router(sources_router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -68,3 +70,9 @@ async def login_page():
 @app.get("/admin")
 async def admin_page():
     return FileResponse("static/admin.html")
+
+
+@app.get("/source/{chunk_id}")
+async def source_page(chunk_id: str):
+    # The page reads the chunk ID from its own URL and fetches /api/sources/{id}
+    return FileResponse("static/source.html")

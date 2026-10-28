@@ -25,6 +25,9 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* The hidden attribute must win over component display rules */
+[hidden] { display: none !important; }
+
 body {
   font-family: var(--font);
   background: var(--bg);
@@ -33,6 +36,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  overflow-x: hidden;
 }
 
 /* ── Top nav ── */
@@ -192,7 +196,8 @@ body {
 .message {
   display: flex;
   gap: 12px;
-  max-width: 820px;
+  max-width: min(820px, 100%);
+  min-width: 0;
   animation: fade-up 0.2s ease;
 }
 
@@ -234,7 +239,11 @@ body {
   font-size: 0.9rem;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   box-shadow: var(--shadow-sm);
+  /* Flex items default to min-width: auto, so a wide table or long URL in an
+     answer would stretch the row past the screen edge */
+  min-width: 0;
 }
 
 .message.user .bubble {
@@ -713,9 +722,209 @@ body {
   line-height: 1.6;
 }
 
+/* ── Settings panel and view switcher (phones only; see media query) ── */
+/* On desktop the panel's children sit directly in the nav row */
+.nav-settings { display: contents; }
+
+.settings-btn,
+.view-switch { display: none; }
+
+.settings-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 5px 12px;
+  font-size: 0.82rem;
+  font-family: var(--font);
+  cursor: pointer;
+}
+
+.settings-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+
+.key-hint {
+  font-size: 0.75rem;
+  color: var(--committee-ink);
+}
+
+.view-switch {
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.view-btn {
+  flex: 1;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 7px 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: var(--font);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.view-btn.active { background: var(--accent-light); color: var(--accent); border-color: #c4b5fd; }
+
+.sources-count.pulse { animation: pulse 0.9s ease 2; }
+
+@keyframes pulse {
+  50% { background: var(--accent); color: #fff; }
+}
+
+/* ── Citation links in answers, and card highlight ── */
+a.cite {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent);
+}
+
+a.cite:hover { border-bottom-style: solid; }
+
+.source-card.highlight {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79,70,229,0.25);
+}
+
+.card-link {
+  display: inline-block;
+  margin-top: 8px;
+  margin-left: 10px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.card-link:hover { text-decoration: underline; }
+
+/* Wide tables in answers scroll sideways inside the bubble */
+.table-scroll { overflow-x: auto; max-width: 100%; }
+
+/* ── Full-text source page (static/source.html) ── */
+body.source-page {
+  height: auto;
+  min-height: 100dvh;
+  display: block;
+  overflow: auto;
+}
+
+body.source-page .nav-title { text-decoration: none; }
+
+.source-main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
+
+.source-head {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.source-heading {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 4px 0 6px;
+}
+
+.source-questions {
+  margin: 4px 0 10px 1.2em;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.source-link {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.source-link:hover { text-decoration: underline; }
+
+.source-passages { display: flex; flex-direction: column; gap: 10px; }
+
+.passage {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  padding: 12px 14px;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  opacity: 0.85;
+}
+
+.passage.cited {
+  opacity: 1;
+  border-color: var(--accent);
+  border-left-width: 4px;
+  box-shadow: var(--shadow);
+}
+
+.context-btn {
+  display: block;
+  width: 100%;
+  margin: 10px 0;
+  padding: 9px;
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--card-radius);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-family: var(--font);
+  cursor: pointer;
+}
+
+.context-btn:hover { border-color: var(--accent); color: var(--accent); }
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
-  .sources-panel { display: none; }
-  #key-input { width: 130px; }
-  .year-range { display: none; }
+  .nav { padding: 8px 12px; }
+
+  .settings-btn { display: inline-block; }
+
+  /* Settings drop down as a full-width panel under the title row */
+  .nav-settings {
+    display: none;
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px 0 4px;
+  }
+
+  .nav-settings.open { display: flex; }
+
+  .nav-settings select,
+  #key-input { width: 100%; font-size: 16px; }  /* 16px stops iOS zooming on focus */
+
+  .filter-pills { flex-wrap: wrap; }
+  .quota-badge { align-self: flex-start; }
+
+  .view-switch { display: flex; }
+
+  /* One panel at a time, chosen by the switcher */
+  .main[data-view="chat"] .sources-panel { display: none; }
+  .main[data-view="sources"] .chat-panel { display: none; }
+  .sources-panel { width: 100%; }
+  .chat-panel { border-right: none; }
+
+  .messages { padding: 16px 12px; }
+  .message { gap: 8px; }
+  .avatar { width: 28px; height: 28px; }
+  .input-area { padding: 10px 12px; }
+  #chat-input { font-size: 16px; }
 }
