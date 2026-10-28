@@ -256,6 +256,7 @@ The chat endpoint streams Server-Sent Events in this order:
 | `sources` | `SourceCard[]` (without `text`) | Sent before LLM starts |
 | `token` | `{"text": "..."}` | One per LLM token |
 | `done` | `{"finish_reason": "stop", "queries_remaining": N}` | `queries_remaining` absent for BYOK |
+| `notice` | `{"message": "..."}` | Sent if a model on the server's keys fails before any text and the answer falls back to `FALLBACK_MODEL_KEY` (Claude Haiku) |
 | `error` | `{"message": "...", "code"?: "quota_exceeded"}` | Replaces `done` on failure |
 
 ### Admin CLI (`manage.py`)

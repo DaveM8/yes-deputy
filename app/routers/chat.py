@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date
 from typing import Annotated, AsyncIterator
@@ -16,6 +17,10 @@ from app.prompt import build_messages, build_system_prompt
 from app.retrieval import retrieve, wants_recent
 
 router = APIRouter()
+log = logging.getLogger(__name__)
+
+# Used when a model on the server's keys fails before sending any text
+FALLBACK_MODEL_KEY = "claude-haiku"
 
 
 def _sse_event(event: str, data: object) -> str:
@@ -160,28 +165,46 @@ async def _chat_generator(
         max_turns=settings.max_history_turns,
     )
 
+    # On the server's keys, a model that fails before sending any text is retried
+    # once with the fallback model. Own-key failures are the user's key, so no retry.
+    attempts = [(provider, model_info, api_key)]
+    if quota == "free" and chat_req.model_key != FALLBACK_MODEL_KEY:
+        fb_provider, fb_info = get_provider_for_model(FALLBACK_MODEL_KEY)
+        if effective_tier(fb_info, settings) == "free":
+            attempts.append((fb_provider, fb_info, server_key(fb_info.provider, settings)))
+
     # Stream LLM tokens
     token_count = 0
-    try:
-        async for token in provider.stream_chat(
-            messages=messages,
-            system=system_prompt,
-            api_key=api_key,
-            model_id=model_info.model_id,
-            max_tokens=1500,
-        ):
-            token_count += 1
-            yield _sse_event("token", {"text": token})
-    except Exception as exc:
-        # A partial answer still counts; a call on our key that produced nothing
-        # doesn't. An own-key query stays counted once retrieval has run, or a
-        # fake key would get unlimited searches on our OpenAI key. A client
-        # disconnect raises CancelledError, which isn't caught here, so an
-        # abandoned query stays counted too.
-        if token_count == 0 and quota == "free":
-            refund_query(settings.db_path, user["id"], log_date, quota=quota)
-        yield _sse_event("error", {"message": f"LLM error: {exc}"})
-        return
+    for attempt, (llm, info, key) in enumerate(attempts):
+        try:
+            async for token in llm.stream_chat(
+                messages=messages,
+                system=system_prompt,
+                api_key=key,
+                model_id=info.model_id,
+                max_tokens=1500,
+            ):
+                token_count += 1
+                yield _sse_event("token", {"text": token})
+            break
+        except Exception as exc:
+            if token_count == 0 and attempt + 1 < len(attempts):
+                fallback = attempts[attempt + 1][1]
+                log.warning("%s failed, falling back to %s: %s", info.model_id, fallback.model_id, exc)
+                yield _sse_event("notice", {
+                    "message": f"{info.display_name} is unavailable right now, "
+                               f"so this answer is from {fallback.display_name}.",
+                })
+                continue
+            # A partial answer still counts; a call on our key that produced nothing
+            # doesn't. An own-key query stays counted once retrieval has run, or a
+            # fake key would get unlimited searches on our OpenAI key. A client
+            # disconnect raises CancelledError, which isn't caught here, so an
+            # abandoned query stays counted too.
+            if token_count == 0 and quota == "free":
+                refund_query(settings.db_path, user["id"], log_date, quota=quota)
+            yield _sse_event("error", {"message": f"LLM error: {exc}"})
+            return
 
     if token_count == 0 and quota == "free":
         refund_query(settings.db_path, user["id"], log_date, quota=quota)

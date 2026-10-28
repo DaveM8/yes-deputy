@@ -457,6 +457,7 @@ body {
   cursor: pointer;
   font-size: 0.75rem;
   margin-top: 4px;
+  margin-right: 10px;
   display: inline-block;
   font-weight: 500;
 }
@@ -501,6 +502,13 @@ body {
   border-radius: 8px;
   padding: 10px 14px;
   font-size: 0.85rem;
+  max-width: 820px;
+}
+
+.notice-msg {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: -8px 0 0 44px;
   max-width: 820px;
 }
 
@@ -794,7 +802,6 @@ a.cite:hover { border-bottom-style: solid; }
 .card-link {
   display: inline-block;
   margin-top: 8px;
-  margin-left: 10px;
   font-size: 0.76rem;
   font-weight: 600;
   color: var(--accent);

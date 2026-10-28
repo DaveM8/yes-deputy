@@ -222,6 +222,14 @@ function appendError(message) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// e.g. "DeepSeek Flash is unavailable right now, so this answer is from Claude Haiku."
+function appendNotice(message) {
+  const div = document.createElement("div");
+  div.className = "notice-msg";
+  div.textContent = message;
+  messagesEl.appendChild(div);
+}
+
 // ── Source card rendering ──────────────────────────────────────────────────
 function setSourcesCount(text) {
   sourcesCount.textContent = text;
@@ -391,6 +399,8 @@ async function streamChat(userText, bubble) {
             assistantText += obj.text;
             bubble.textContent = assistantText;
             messagesEl.scrollTop = messagesEl.scrollHeight;
+          } else if (currentEvent === "notice") {
+            appendNotice(obj.message);
           } else if (currentEvent === "error") {
             bubble.classList.remove("streaming");
             appendError(obj.message);
