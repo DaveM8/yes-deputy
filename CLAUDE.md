@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-**Yes Deputy** — a parliamentary research tool for searching and analysing Irish Oireachtas written answers (parliamentary questions asked by TDs/Senators and answers given by Ministers).
+**Yes Deputy** — a knowledge-discovery tool over the Irish Oireachtas record: everything said in the Dáil, Seanad and committees since 1919 (debates, Leaders' Questions, statements, committee hearings), plus parliamentary questions and ministerial written/oral answers.
+
+**October 2026 change of scope:** the project began as a written-answers (Q&A) tool. It now indexes every speech, and `/api/chat` is expected to answer general questions over the whole record. The April notes below on search UX still apply, but "LLM/RAG is a future add-on" is no longer the priority order.
 
 ### Product direction (as of April 2026)
 
@@ -27,7 +29,7 @@ The primary product is a **human-first research tool** — a specialist search i
 - Auto-save of all composed answers to database
 - Keyboard-first UX — tab navigation, minimal friction
 
-**Implementation status:** none of the sprint features above exist yet. The only query path is `/api/chat`, whose retrieval (`app/retrieval.py`) is pure kNN over embeddings — no BM25/keyword component. `SearchFilters` supports only `house` and `year_from`/`year_to`. There is no table for saved answers in SQLite yet.
+**Implementation status:** the only query path is `/api/chat`. Its retrieval (`app/retrieval.py`) is hybrid kNN + BM25 (see "Request flow" below). `SearchFilters` supports `house`, `year_from`/`year_to`, `member` and `sort`. There is no standalone search UI and no table for saved answers in SQLite yet.
 
 #### LLM integration — future phase
 - Add as optional enhancement once the human research tool is solid
@@ -70,7 +72,9 @@ Requires a `.env` file (or environment variables) — see `app/config.py` for th
 
 ## Nightly incremental pipeline
 
-`run_pipeline.sh` is the end-to-end update job (every step idempotent, logs to `pipeline_logs/`, keeps last 30):
+`run_pipeline.sh` is the end-to-end update job (cron, 02:00 daily; every step idempotent; logs to `pipeline_logs/`, keeps last 30). It takes `pipeline.lock` with `flock` and skips if the lock is held. Run long manual backfills as `flock pipeline.lock <command>` so the two never overlap.
+
+Steps:
 1. `update_xmls.py --chamber dail`, then `--chamber seanad`
 2. `update_committees.py` — committee debates, saved under `questions_xml/akn/ie/debateRecord/{committee_code}/{date}/debate/mul@/main.xml`
 3. `chunk_for_rag.py --from-date <today−14d> --out chunks_pipeline.jsonl` (14-day overlap catches late-published documents)
@@ -152,11 +156,13 @@ python chunk_for_rag.py \
     --workers 8 \
     --max-chars 1500
 ```
-Produces two chunk types per debate section:
-- `answer_text` — prose paragraphs grouped up to `--max-chars`
-- `table` — one chunk per embedded HTML table, with preceding prose prepended as context
+Each `debateSection` (at any nesting depth) goes down one of two paths:
+- **Has direct `<question>` children** (written answers, oral PQs): `answer_text` chunks of the answer prose up to `--max-chars`, plus `table` chunks (one per HTML table, preceding prose prepended).
+- **No `<question>`** (debates, Leaders' Questions, statements, committees, Seanad): `speech` chunks via `chunk_speeches()`. That's one chunk per speech (split over `--max-chars`), with text prefixed `"Speaker (role): "`. Speeches under `MIN_SPEECH_CHARS` (200) are merged into exchange chunks. Tables inside speeches become `table` chunks that also carry speaker fields.
 
-`--from-date` restricts to XML files on/after a date. The output file is **overwritten** unless `--append` is passed (the module docstring's mention of a `chunks.jsonl.seen` sidecar is stale — it isn't implemented). Deduplication happens downstream: `embed_and_index.py` skips chunk IDs already in the index.
+Speech chunk IDs include the chamber or committee code (`speech|{source_key}|{eId}`), because different committees sitting on one date reuse `dbsect_N` eIds. Q&A chunk IDs are unchanged from the original scheme; don't change either formula, or everything gets re-embedded.
+
+`--from-date` restricts to XML files on/after a date. The output file is **overwritten** unless `--append` is passed. Deduplication happens downstream: `embed_and_index.py` skips chunk IDs already in the index, including duplicate lines within one file.
 
 ### Stage 5 — Embed and index chunks (the index the web app queries)
 ```bash
@@ -169,7 +175,9 @@ python embed_and_index.py \
 # Create/recreate the index mapping only:
 python embed_and_index.py ... --setup-only
 ```
-Embeds with `text-embedding-3-small` (1536 dims) and bulk-indexes into Elasticsearch with a `dense_vector` field for kNN search. Idempotent — skips already-indexed chunk IDs. The default index name `oireachtas-chunks` matches `ES_INDEX` in `app/config.py`.
+Embeds with `text-embedding-3-small` (1536 dims) and bulk-indexes into Elasticsearch with a `dense_vector` field (`int8_hnsw`) for kNN search. Idempotent — skips already-indexed chunk IDs.
+
+**Indices:** the app and the nightly pipeline use `ES_INDEX=oireachtas-search` (set in `.env`), an alias pointing to `oireachtas-chunks-v2`. The v2 mapping (`INDEX_MAPPING`) adds speech fields and **excludes `embedding` from `_source`** to halve storage. Consequence: v2's vectors can't be copied out with `_reindex`; a mapping change means re-embedding from the chunk files. The original `oireachtas-chunks` index (Q&A only, vectors in `_source`) is kept as a rollback target until v2 is verified. Person-name fields have `.keyword` sub-fields for exact filtering.
 
 ### Analysis
 `stats.py` is an exploratory Polars script that reads `written_answers.parquet` directly. Run it as a script or paste sections into IPython.
@@ -193,6 +201,8 @@ Each record in the Parquet/Elasticsearch index represents one **debate section**
 | `questions` | list[string] | Cleaned question texts (deduplicated in `stats.py`) |
 | `answer_clean` | string | Answer text with housekeeping phrases stripped |
 
+**Chunk index documents** (`oireachtas-chunks-v2`) carry the Q&A fields above per chunk (`answering_person`, `asking_persons`, `questions`, …) and add `chunk_type` (`answer_text` | `table` | `speech`), `committee` (committee code, empty for Dáil/Seanad), `doc_type` (`debate` | `writtens`), `section_type` (AKN section `name`: debate, questions, motion, statement, topical, …) and `heading_path` (nested headings joined with ` > `). Speech chunks also have `speaker`, `speaker_role` and `speakers` (everyone in a merged exchange). `house` is `Dáil`, `Seanad` or `Committee`.
+
 ## XML format notes
 
 Source files use the **Akoma Ntoso (AKN)** namespace `http://docs.oasis-open.org/legaldocml/ns/akn/3.0/CSD13`. The parser uses `{*}` wildcard namespace matching for robustness (`root.findall('.//{*}debateSection')`), except where the `NS` dict is explicitly passed.
@@ -211,10 +221,11 @@ The FastAPI app lives in `app/`. It serves a single-page frontend from `static/`
 ### Request flow for `/api/chat`
 1. JWT auth (`app/auth.py`) — Bearer token, 30-day expiry, bcrypt passwords
 2. Rate-limit check — `FREE_QUERIES_PER_DAY` per user per day, stored in SQLite (`app/database.py`)
-3. Retrieval (`app/retrieval.py`) — embed query with OpenAI → kNN search against Elasticsearch `oireachtas-chunks` index
-4. Source cards streamed immediately as an SSE `sources` event (before LLM starts)
-5. LLM streaming (`app/llm/`) — each token yielded as an SSE `token` event
-6. `done` event with remaining quota sent on completion
+3. Filter inference (`_infer_filters` in `app/routers/chat.py`) fills in filters the user didn't set. A full person name found in the question sets `member`, matched by `MemberIndex` (accent-insensitive, multi-word names only, name list refreshed hourly from the index). Recency words ("last", "latest", "recently") set `sort="date"`. A single named chamber sets `house`.
+4. Retrieval (`app/retrieval.py`). Default: kNN and BM25 run concurrently and are fused with Reciprocal Rank Fusion, done in Python rather than ES's `rrf` retriever. Card `score` is normalised so rank 1 in both searches = 1.0. With `sort="date"`: a filtered query, newest first, where the remaining topic words (`topic_terms()`) must all match. `member` matches `speaker`/`speakers`/`answering_person`/`asking_persons` `.keyword` fields.
+5. Source cards streamed immediately as an SSE `sources` event (before LLM starts)
+6. LLM streaming (`app/llm/`) — each token yielded as an SSE `token` event
+7. `done` event with remaining quota sent on completion
 
 ### LLM provider abstraction (`app/llm/`)
 - `base.py` defines the `LLMProvider` ABC with `stream_chat()`

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Annotated, AsyncIterator
 
 from fastapi import APIRouter, Depends, Request
@@ -9,15 +10,45 @@ from fastapi.responses import StreamingResponse
 from app.auth import get_current_user
 from app.database import get_query_count, increment_query_count
 from app.llm.registry import get_provider_for_model
-from app.models import ChatRequest, SourceCard
+from app.models import ChatRequest, SearchFilters, SourceCard
 from app.prompt import build_messages, build_system_prompt
-from app.retrieval import retrieve
+from app.retrieval import retrieve, wants_recent
 
 router = APIRouter()
 
 
 def _sse_event(event: str, data: object) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+_HOUSE_WORDS = {
+    "Dáil": re.compile(r"\bd[aá]il\b", re.IGNORECASE),
+    "Seanad": re.compile(r"\bseanad\b", re.IGNORECASE),
+    "Committee": re.compile(r"\bcommittees?\b", re.IGNORECASE),
+}
+
+
+async def _infer_filters(filters: SearchFilters, query: str, request: Request) -> SearchFilters:
+    """
+    Fill in filters the question implies but the user didn't set explicitly:
+    a full member name, recency wording ("last time", "latest"), and a single
+    named chamber. Explicit filters always win.
+    """
+    inferred = filters.model_copy()
+    if not inferred.member:
+        members = request.app.state.members
+        try:
+            await members.ensure_fresh(request.app.state.es, request.app.state.settings.es_index)
+        except Exception:
+            pass  # name detection is best-effort
+        inferred.member = members.find(query)
+    if inferred.sort == "relevance" and wants_recent(query):
+        inferred.sort = "date"
+    if not inferred.house:
+        named = [h for h, rx in _HOUSE_WORDS.items() if rx.search(query)]
+        if len(named) == 1:
+            inferred.house = named[0]
+    return inferred
 
 
 def _resolve_api_key(request_key: str | None, provider: str, settings) -> str:
@@ -68,6 +99,7 @@ async def _chat_generator(
 
     # Retrieve relevant chunks
     try:
+        filters = await _infer_filters(chat_req.filters, chat_req.message, request)
         cards: list[SourceCard] = await retrieve(
             es,
             openai_client,
@@ -75,7 +107,7 @@ async def _chat_generator(
             index=settings.es_index,
             k=settings.retrieval_k,
             num_candidates=settings.retrieval_num_candidates,
-            filters=chat_req.filters,
+            filters=filters,
         )
     except Exception as exc:
         yield _sse_event("error", {"message": f"Retrieval failed: {exc}"})
@@ -85,7 +117,7 @@ async def _chat_generator(
     yield _sse_event("sources", [c.model_dump(exclude={"text"}) for c in cards])
 
     # Build prompt and messages
-    system_prompt = build_system_prompt(cards)
+    system_prompt = build_system_prompt(cards, newest_first=filters.sort == "date")
     messages = build_messages(
         chat_req.history,
         chat_req.message,

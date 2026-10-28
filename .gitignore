@@ -44,3 +44,13 @@ oneline.json
 
 # ── Claude Code internal ──────────────────────────────────────────────────────
 .claude/
+
+*~
+*.bak
+*.swp
+
+# ── Pipeline runtime files ───────────────────────────────────────────────────
+chunks_all.jsonl
+chunks_pipeline.jsonl
+pipeline.lock
+backfill_run*.out

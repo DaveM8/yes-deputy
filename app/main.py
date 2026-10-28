@@ -14,6 +14,7 @@ from app.routers.admin_router import router as admin_router
 from app.routers.auth_router import router as auth_router
 from app.routers.chat import router as chat_router
 from app.routers.health import router as health_router
+from app.retrieval import MemberIndex
 
 
 @asynccontextmanager
@@ -29,6 +30,14 @@ async def lifespan(app: FastAPI):
     app.state.es = AsyncElasticsearch(**es_kwargs)
     app.state.openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
     app.state.settings = settings
+
+    # Person names for spotting "Micheál Martin" etc. in questions. A failure here
+    # (e.g. ES briefly down) must not stop the app; ensure_fresh retries per request.
+    app.state.members = MemberIndex()
+    try:
+        await app.state.members.refresh(app.state.es, settings.es_index)
+    except Exception:
+        pass
 
     yield
 

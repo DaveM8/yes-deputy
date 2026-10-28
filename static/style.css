@@ -12,6 +12,8 @@
   --dail-bg: #dcfce7;
   --seanad-blue: #1d4ed8;
   --seanad-bg: #dbeafe;
+  --committee-ink: #92400e;
+  --committee-bg: #fef3c7;
   --error: #dc2626;
   --error-bg: #fee2e2;
   --success: #16a34a;
@@ -391,6 +393,7 @@ body {
 
 .house-badge.dail  { background: var(--dail-bg);   color: var(--dail-green); }
 .house-badge.seanad { background: var(--seanad-bg); color: var(--seanad-blue); }
+.house-badge.committee { background: var(--committee-bg); color: var(--committee-ink); }
 
 .date-chip {
   color: var(--text-muted);

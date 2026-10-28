@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-Chunk Oireachtas written-answer XML files into RAG-ready JSONL.
+Chunk Oireachtas debate and written-answer XML files into RAG-ready JSONL.
 
-Each record produces two types of chunks:
-  - answer_text : prose paragraphs grouped up to --max-chars
+Sections with <question> children (written answers, oral PQs) produce:
+  - answer_text : answer prose grouped up to --max-chars
   - table       : one chunk per embedded table, with preceding prose prepended as context
+
+All other sections (debates, Leaders' Questions, statements, committee hearings) produce:
+  - speech      : one chunk per speech, split over --max-chars, prefixed "Speaker (role): ".
+                  Consecutive short speeches (interjections) are merged into one exchange chunk.
+  - table       : tables inside speeches, as above
 
 Output is newline-delimited JSON (JSONL), one chunk per line.
 Each chunk is self-contained — it carries the full metadata needed for citation.
@@ -16,9 +21,10 @@ Usage:
         --workers  8 \\
         --max-chars 1500
 
-Resume / incremental:
-    Already-written chunk IDs are tracked via a sidecar file (chunks.jsonl.seen).
-    Re-running will skip XML files whose output is already present.
+Incremental:
+    --from-date limits processing to files on/after a date. The output file is
+    overwritten unless --append is given; embed_and_index.py skips chunk IDs that
+    are already indexed, so re-chunking overlapping ranges is safe.
 """
 
 import argparse
@@ -40,6 +46,7 @@ from lxml import etree
 NS            = {'akn': 'http://docs.oasis-open.org/legaldocml/ns/akn/3.0/CSD13'}
 XML_WORKERS   = 8
 DEFAULT_MAX_CHARS = 1500
+MIN_SPEECH_CHARS  = 200   # shorter speeches are merged into an exchange chunk
 LOG_FILE      = "chunker.log"
 
 logging.basicConfig(
@@ -309,6 +316,85 @@ def chunk_blocks(blocks: list[dict], max_chars: int) -> list[dict]:
     return chunks
 
 
+def chunk_speeches(speeches: list, resolve, max_chars: int) -> list[dict]:
+    """
+    Chunk a section's speeches, keeping each chunk attributable to its speaker(s).
+
+    Rules:
+      - Each speech is chunked on its own via chunk_blocks(); every chunk is
+        prefixed "Speaker (role): " so the speaker is visible to BM25 and embeddings.
+      - Text-only speeches shorter than MIN_SPEECH_CHARS are buffered and merged
+        with adjacent short speeches into one exchange chunk (up to max_chars).
+      - Each chunk carries speaker (the one contributing most text), speaker_role
+        and speakers (everyone in the chunk).
+    """
+    chunks: list[dict] = []
+    exchange: list[tuple[str, str, str]] = []   # (speaker, role, labelled text)
+    exchange_chars = 0
+
+    def label(speaker: str, role: str) -> str:
+        return f"{speaker} ({role})" if role else speaker
+
+    def flush_exchange():
+        nonlocal exchange, exchange_chars
+        if exchange:
+            weight: dict[str, int] = {}
+            for spk, _, text in exchange:
+                weight[spk] = weight.get(spk, 0) + len(text)
+            main = max(weight, key=weight.get)
+            chunks.append({
+                'chunk_type':   'speech',
+                'text':         '\n\n'.join(text for _, _, text in exchange),
+                'speaker':      main,
+                'speaker_role': next(r for s, r, _ in exchange if s == main),
+                'speakers':     list(dict.fromkeys(s for s, _, _ in exchange if s)),
+            })
+            exchange = []
+            exchange_chars = 0
+
+    for speech in speeches:
+        speaker = resolve(speech.get('by'))
+        if not speaker:
+            from_elem = speech.find('{*}from')
+            speaker = get_text(from_elem) if from_elem is not None else ''
+        role = resolve(speech.get('as')) if speech.get('as') else ''
+
+        blocks = extract_blocks([speech])
+        if not blocks:
+            continue
+        prefix = f"{label(speaker, role)}: " if speaker else ''
+
+        text_len = sum(len(b['text']) for b in blocks if b['type'] == 'text')
+        if text_len < MIN_SPEECH_CHARS and all(b['type'] == 'text' for b in blocks):
+            text = prefix + ' '.join(b['text'] for b in blocks)
+            if exchange and exchange_chars + len(text) > max_chars:
+                flush_exchange()
+            exchange.append((speaker, role, text))
+            exchange_chars += len(text)
+            continue
+
+        flush_exchange()
+        for sub in chunk_blocks(blocks, max_chars):
+            sub.pop('chunk_index')
+            if sub['chunk_type'] == 'answer_text':
+                sub['chunk_type'] = 'speech'
+                sub['text'] = prefix + sub['text']
+            else:  # table: keep the speaker visible without disturbing the table layout
+                sub['text'] = f"{prefix.rstrip()}\n{sub['text']}" if prefix else sub['text']
+            chunks.append({
+                **sub,
+                'speaker':      speaker,
+                'speaker_role': role,
+                'speakers':     [speaker] if speaker else [],
+            })
+
+    flush_exchange()
+
+    for i, chunk in enumerate(chunks):
+        chunk['chunk_index'] = i
+    return chunks
+
+
 # ─────────────────────────────────────────────
 # RECORD ID + METADATA
 # ─────────────────────────────────────────────
@@ -389,10 +475,10 @@ def process_xml(args: tuple) -> tuple[str, list[dict], str | None]:
     else:
         house = ''
 
-    all_chunks: list[dict] = []
+    source_key, doc_type = _source_from_path(str(xml_path))
+    committee = source_key if house == 'Committee' else ''
 
-    for section in root.findall('.//{*}debateSection', NS):
-        # Heading
+    def section_heading(section) -> str:
         heading_elem = section.find('akn:heading', NS)
         heading = ''
         if heading_elem is not None:
@@ -401,7 +487,28 @@ def process_xml(args: tuple) -> tuple[str, list[dict], str | None]:
                 tail = (child.tail or '').strip()
                 if tail:
                     heading += ' ' + tail
-            heading = heading.strip()
+        return heading.strip()
+
+    all_chunks: list[dict] = []
+
+    for section in root.findall('.//{*}debateSection', NS):
+        heading = section_heading(section)
+        ancestors = [a for a in section.iterancestors() if localname(a.tag) == 'debateSection']
+        heading_path = ' > '.join(
+            h for h in [section_heading(a) for a in reversed(ancestors)] + [heading] if h
+        )
+        section_id = section.get('eId', '')
+        section_meta = {
+            'date':         debate_date,
+            'year':         year,
+            'house':        house,
+            'committee':    committee,
+            'doc_type':     doc_type,
+            'heading':      heading,
+            'heading_path': heading_path,
+            'section_id':   section_id,
+            'section_type': section.get('name', ''),
+        }
 
         # Questions
         questions: list[dict] = []
@@ -418,6 +525,20 @@ def process_xml(args: tuple) -> tuple[str, list[dict], str | None]:
             })
 
         if not questions:
+            # Debate, statements, Leaders' Questions, committee hearing, ...
+            speeches = section.findall('akn:speech', NS)
+            if not speeches:
+                continue
+            # source_key in the ID keeps committees sitting on the same date
+            # (with the same dbsect_N eIds) apart
+            record_id = make_record_id(debate_date, f"speech|{source_key}|{section_id}", house)
+            for chunk in chunk_speeches(speeches, resolve, max_chars):
+                all_chunks.append({
+                    'id':        make_chunk_id(record_id, chunk['chunk_index']),
+                    'record_id': record_id,
+                    **section_meta,
+                    **chunk,
+                })
             continue
 
         # Speeches — skip unanswered sections (<summary> present instead)
@@ -434,17 +555,12 @@ def process_xml(args: tuple) -> tuple[str, list[dict], str | None]:
         ))
         department_role = roles[0] if len(roles) == 1 else '; '.join(roles)
 
-        section_id = section.get('eId', '')
         record_id  = make_record_id(debate_date, section_id, house)
 
         # Build shared metadata for every chunk from this section
         base_meta = {
             'record_id':       record_id,
-            'date':            debate_date,
-            'year':            year,
-            'house':           house,
-            'heading':         heading,
-            'section_id':      section_id,
+            **section_meta,
             'department_role': department_role,
             'answering_person': answered_by,
             'answering_role':  answering_role,
@@ -475,6 +591,16 @@ def process_xml(args: tuple) -> tuple[str, list[dict], str | None]:
 # ─────────────────────────────────────────────
 
 _DATE_IN_PATH = re.compile(r'/(\d{4}-\d{2}-\d{2})/')
+_SOURCE_IN_PATH = re.compile(r'/debateRecord/([^/]+)/\d{4}-\d{2}-\d{2}/([^/]+)/')
+
+
+def _source_from_path(p: str) -> tuple[str, str]:
+    """
+    Return (source_key, doc_type) from .../debateRecord/{source_key}/{date}/{doc_type}/...
+    source_key is 'dail', 'seanad' or a committee code; doc_type is 'debate' or 'writtens'.
+    """
+    m = _SOURCE_IN_PATH.search(p)
+    return (m.group(1), m.group(2)) if m else ('', '')
 
 
 def _date_from_path(p: Path) -> str:

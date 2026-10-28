@@ -13,6 +13,8 @@ class SearchFilters(BaseModel):
     house: str | None = None
     year_from: int | None = None
     year_to: int | None = None
+    member: str | None = None  # exact name: speaker, minister or questioner
+    sort: Literal["relevance", "date"] = "relevance"
 
 
 class ChatRequest(BaseModel):
@@ -25,7 +27,7 @@ class ChatRequest(BaseModel):
 
 class SourceCard(BaseModel):
     chunk_id: str
-    chunk_type: Literal["answer_text", "table"]
+    chunk_type: Literal["answer_text", "table", "speech"]
     date: str
     house: str
     heading: str
@@ -38,3 +40,9 @@ class SourceCard(BaseModel):
     text: str             # full chunk text — injected into system prompt
     score: float          # cosine similarity score
     table_caption: str | None = None
+    # Speech chunks (debates, committees); empty for written/oral answers
+    speaker: str = ""
+    speaker_role: str = ""
+    section_type: str = ""
+    heading_path: str = ""
+    committee: str = ""

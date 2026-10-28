@@ -84,6 +84,10 @@ INDEX_MAPPING = {
         }
     },
     "mappings": {
+        # Vectors are indexed but not stored again in _source: that roughly halves
+        # per-doc storage. Consequence: _reindex can't copy embeddings out of an
+        # index built with this mapping — keep the chunk files to re-embed.
+        "_source": {"excludes": ["embedding"]},
         "properties": {
             # ── Chunk identity ─────────────────────────────
             "id": {
@@ -96,7 +100,7 @@ INDEX_MAPPING = {
                 "type": "integer"
             },
             "chunk_type": {
-                "type": "keyword"       # "answer_text" | "table"
+                "type": "keyword"       # "answer_text" | "table" | "speech"
             },
             # ── Debate metadata ────────────────────────────
             "date": {
@@ -107,7 +111,20 @@ INDEX_MAPPING = {
                 "type": "integer"
             },
             "house": {
-                "type": "keyword"       # "Dáil" | "Seanad"
+                "type": "keyword"       # "Dáil" | "Seanad" | "Committee"
+            },
+            "committee": {
+                "type": "keyword"       # committee code from the path; "" for Dáil/Seanad
+            },
+            "doc_type": {
+                "type": "keyword"       # "debate" | "writtens"
+            },
+            "section_type": {
+                "type": "keyword"       # debateSection name: debate, questions, motion, ...
+            },
+            "heading_path": {
+                "type":   "text",
+                "fields": {"keyword": {"type": "keyword", "ignore_above": 1024}}
             },
             "heading": {
                 "type":   "text",
@@ -129,6 +146,19 @@ INDEX_MAPPING = {
                 "fields": {"keyword": {"type": "keyword", "ignore_above": 512}}
             },
             "asking_persons": {
+                "type":   "text",
+                "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
+            },
+            # ── Speech metadata (chunk_type "speech") ──────
+            "speaker": {
+                "type":   "text",
+                "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
+            },
+            "speaker_role": {
+                "type":   "text",
+                "fields": {"keyword": {"type": "keyword", "ignore_above": 512}}
+            },
+            "speakers": {
                 "type":   "text",
                 "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
             },
@@ -260,6 +290,12 @@ def embed_texts(client: OpenAI, texts: list[str]) -> list[list[float]]:
             items = sorted(resp.data, key=lambda x: x.index)
             return [item.embedding for item in items]
         except RateLimitError as e:
+            # Also a 429, but retrying can't help: the account has no credit
+            if getattr(e, "code", None) == "insufficient_quota":
+                raise RuntimeError(
+                    "OpenAI account has no credit remaining. Add credit, then rerun: "
+                    "already-indexed chunks are skipped."
+                ) from e
             delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
             log.warning(f"  Rate limit (attempt {attempt}/{MAX_RETRIES}), sleeping {delay:.0f}s: {e}")
             time.sleep(delay)

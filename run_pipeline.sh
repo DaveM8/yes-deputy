@@ -19,6 +19,14 @@ mkdir -p "$LOG_DIR"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 
+# One pipeline at a time: a long manual backfill holds this lock too
+# (flock pipeline.lock <command>), so the nightly cron run skips instead of overlapping.
+exec 9>pipeline.lock
+if ! flock -n 9; then
+    log "Another pipeline run holds pipeline.lock — skipping this run"
+    exit 0
+fi
+
 log "=== Yes Deputy pipeline starting ==="
 log "Chunk from-date: $FROM_DATE"
 

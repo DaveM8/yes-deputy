@@ -200,7 +200,7 @@ function renderSourceCards(cards) {
 }
 
 function buildSourceCard(card, n) {
-  const houseClass = card.house === "Dáil" ? "dail" : "seanad";
+  const houseClass = { "Dáil": "dail", "Seanad": "seanad" }[card.house] || "committee";
   const scorePercent = Math.round(card.score * 100);
 
   const el = document.createElement("div");
@@ -215,7 +215,10 @@ function buildSourceCard(card, n) {
 
   const houseBadge = document.createElement("span");
   houseBadge.className = `house-badge ${houseClass}`;
-  houseBadge.textContent = card.house;
+  // Committee codes look like "committee_of_public_accounts"
+  houseBadge.textContent = card.committee
+    ? card.committee.replace(/_/g, " ").replace(/^./, c => c.toUpperCase())
+    : card.house;
 
   const dateChip = document.createElement("span");
   dateChip.className = "date-chip";
@@ -234,11 +237,14 @@ function buildSourceCard(card, n) {
 
   const heading = document.createElement("div");
   heading.className = "card-heading";
-  heading.textContent = card.heading || "(no heading)";
+  heading.textContent = card.heading_path || card.heading || "(no heading)";
 
   const minister = document.createElement("div");
   minister.className = "card-minister";
-  minister.textContent = `${card.answering_person} · ${card.answering_role}`;
+  // Debate/committee speeches name the speaker; PQ answers name the minister
+  const person = card.speaker || card.answering_person;
+  const role = card.speaker ? card.speaker_role : card.answering_role;
+  minister.textContent = role ? `${person} · ${role}` : person;
 
   const excerpt = document.createElement("div");
   excerpt.className = "card-excerpt";
