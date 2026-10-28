@@ -54,25 +54,43 @@ app.include_router(chat_router)
 app.include_router(health_router)
 app.include_router(sources_router)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# "no-cache" means "revalidate before use", not "don't store": browsers keep
+# the file but check its ETag first (a cheap 304). Without it, browsers guess a
+# lifetime from Last-Modified, and iOS kept running an old app.js against a
+# new index.html after a deploy.
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class _RevalidatedStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(_NO_CACHE)
+        return response
+
+
+app.mount("/static", _RevalidatedStaticFiles(directory="static"), name="static")
+
+
+def _page(path: str) -> FileResponse:
+    return FileResponse(path, headers=_NO_CACHE)
 
 
 @app.get("/")
 async def index():
-    return FileResponse("static/index.html")
+    return _page("static/index.html")
 
 
 @app.get("/login")
 async def login_page():
-    return FileResponse("static/auth.html")
+    return _page("static/auth.html")
 
 
 @app.get("/admin")
 async def admin_page():
-    return FileResponse("static/admin.html")
+    return _page("static/admin.html")
 
 
 @app.get("/source/{chunk_id}")
 async def source_page(chunk_id: str):
     # The page reads the chunk ID from its own URL and fetches /api/sources/{id}
-    return FileResponse("static/source.html")
+    return _page("static/source.html")
