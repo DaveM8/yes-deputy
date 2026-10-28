@@ -220,7 +220,7 @@ The FastAPI app lives in `app/`. It serves a single-page frontend from `static/`
 
 ### Request flow for `/api/chat`
 1. JWT auth (`app/auth.py`) — Bearer token, 30-day expiry, bcrypt passwords
-2. Rate-limit check — `FREE_QUERIES_PER_DAY` per user per day, stored in SQLite (`app/database.py`)
+2. Model check, then quota. `tier="paid"` models need the user's own key (admins exempt). The query is then reserved with `reserve_query()`, a single conditional `UPDATE` in SQLite (`app/database.py`), before any retrieval or LLM work. It's refunded only if retrieval fails or the LLM produces nothing; a client disconnect stays counted. Limits: `FREE_QUERIES_PER_DAY` on the server's keys, or `BYOK_QUERIES_PER_DAY` (`byok_count` column) with the user's own key, since retrieval still uses the server's OpenAI key. Request sizes are capped in `app/models.py`.
 3. Filter inference (`_infer_filters` in `app/routers/chat.py`) fills in filters the user didn't set. A full person name found in the question sets `member`, matched by `MemberIndex` (accent-insensitive, multi-word names only, name list refreshed hourly from the index). Recency words ("last", "latest", "recently") set `sort="date"`. A single named chamber sets `house`.
 4. Retrieval (`app/retrieval.py`). Default: kNN and BM25 run concurrently and are fused with Reciprocal Rank Fusion, done in Python rather than ES's `rrf` retriever. Card `score` is normalised so rank 1 in both searches = 1.0. With `sort="date"`: a filtered query, newest first, where the remaining topic words (`topic_terms()`) must all match. `member` matches `speaker`/`speakers`/`answering_person`/`asking_persons` `.keyword` fields.
 5. Source cards streamed immediately as an SSE `sources` event (before LLM starts)

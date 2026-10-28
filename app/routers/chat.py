@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from typing import Annotated, AsyncIterator
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from app.auth import get_current_user
-from app.database import get_query_count, increment_query_count
+from app.database import refund_query, reserve_query
 from app.llm.registry import get_provider_for_model
 from app.models import ChatRequest, SearchFilters, SourceCard
 from app.prompt import build_messages, build_system_prompt
@@ -72,29 +73,42 @@ async def _chat_generator(
     es = request.app.state.es
     openai_client = request.app.state.openai_client
 
-    # Rate limiting: check quota when no BYOK key is provided
-    if not chat_req.api_key:
-        used = get_query_count(settings.db_path, user["id"])
-        if used >= settings.free_queries_per_day:
-            yield _sse_event("error", {
-                "message": (
-                    f"You've used all {settings.free_queries_per_day} free queries for today. "
-                    "Add your own API key to continue, or come back tomorrow."
-                ),
-                "code": "quota_exceeded",
-            })
-            return
-
     try:
         provider, model_info = get_provider_for_model(chat_req.model_key)
     except ValueError as exc:
         yield _sse_event("error", {"message": str(exc)})
         return
 
+    if model_info.tier == "paid" and not chat_req.api_key and not user["is_admin"]:
+        yield _sse_event("error", {
+            "message": f"{model_info.display_name} needs your own API key. "
+                       "Add one in the settings, or choose a free model.",
+        })
+        return
+
     try:
         api_key = _resolve_api_key(chat_req.api_key, model_info.provider, settings)
     except ValueError as exc:
         yield _sse_event("error", {"message": str(exc)})
+        return
+
+    # Count the query before doing any work: checking first and counting after the
+    # answer let parallel requests, or a client that disconnects mid-answer, go
+    # uncounted. Own-key queries have their own, higher limit because retrieval
+    # still runs on the server's OpenAI key.
+    quota = "byok" if chat_req.api_key else "free"
+    limit = settings.byok_queries_per_day if chat_req.api_key else settings.free_queries_per_day
+    log_date = date.today().isoformat()
+    used = reserve_query(settings.db_path, user["id"], log_date, limit, quota=quota)
+    if used is None:
+        message = (
+            f"You've used all {limit} free queries for today. "
+            "Add your own API key to continue, or come back tomorrow."
+            if quota == "free" else
+            f"You've reached the limit of {limit} searches a day with your own key. "
+            "Please come back tomorrow."
+        )
+        yield _sse_event("error", {"message": message, "code": "quota_exceeded"})
         return
 
     # Retrieve relevant chunks
@@ -110,6 +124,7 @@ async def _chat_generator(
             filters=filters,
         )
     except Exception as exc:
+        refund_query(settings.db_path, user["id"], log_date, quota=quota)
         yield _sse_event("error", {"message": f"Retrieval failed: {exc}"})
         return
 
@@ -137,13 +152,19 @@ async def _chat_generator(
             token_count += 1
             yield _sse_event("token", {"text": token})
     except Exception as exc:
+        # A partial answer still counts; a call that produced nothing doesn't.
+        # A client disconnect raises CancelledError, which isn't caught here,
+        # so an abandoned query stays counted.
+        if token_count == 0:
+            refund_query(settings.db_path, user["id"], log_date, quota=quota)
         yield _sse_event("error", {"message": f"LLM error: {exc}"})
         return
 
-    # Only count the query after a successful response
-    if token_count > 0 and not chat_req.api_key:
-        new_count = increment_query_count(settings.db_path, user["id"])
-        remaining = max(0, settings.free_queries_per_day - new_count)
+    if token_count == 0:
+        refund_query(settings.db_path, user["id"], log_date, quota=quota)
+        used -= 1
+    if quota == "free":
+        remaining = max(0, limit - used)
         yield _sse_event("done", {"finish_reason": "stop", "queries_remaining": remaining})
     else:
         yield _sse_event("done", {"finish_reason": "stop"})

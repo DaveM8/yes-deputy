@@ -37,6 +37,10 @@ def init_db(db_path: str) -> None:
             conn.execute("ALTER TABLE users ADD COLUMN is_approved INTEGER NOT NULL DEFAULT 0")
             # Existing users (created before approval was added) are pre-approved
             conn.execute("UPDATE users SET is_approved = 1")
+        # Migration: separate daily count for searches made with the user's own API key
+        log_cols = {row[1] for row in conn.execute("PRAGMA table_info(query_log)")}
+        if "byok_count" not in log_cols:
+            conn.execute("ALTER TABLE query_log ADD COLUMN byok_count INTEGER NOT NULL DEFAULT 0")
 
 
 @contextmanager
@@ -127,21 +131,48 @@ def get_query_count(db_path: str, user_id: int) -> int:
         return row["count"] if row else 0
 
 
-def increment_query_count(db_path: str, user_id: int) -> int:
-    """Increment today's count and return the new value."""
-    today = date.today().isoformat()
+# Which query_log column a quota uses: free queries on the server's keys, or
+# searches made with the user's own key (whose retrieval still uses ours)
+_QUOTA_COLUMNS = {"free": "count", "byok": "byok_count"}
+
+
+def reserve_query(
+    db_path: str, user_id: int, log_date: str, limit: int, *, quota: str = "free",
+) -> int | None:
+    """
+    Count one query before any work is done. Returns the new count, or None if
+    the user is already at `limit`.
+
+    The limit check and the increment are one UPDATE, so concurrent requests
+    (including from the other uvicorn worker) can't all pass the check.
+    """
+    col = _QUOTA_COLUMNS[quota]
     with _connect(db_path) as conn:
         conn.execute(
-            """
-            INSERT INTO query_log (user_id, log_date, count)
-            VALUES (?, ?, 1)
-            ON CONFLICT (user_id, log_date)
-            DO UPDATE SET count = count + 1
-            """,
-            (user_id, today),
+            "INSERT INTO query_log (user_id, log_date) VALUES (?, ?) "
+            "ON CONFLICT (user_id, log_date) DO NOTHING",
+            (user_id, log_date),
         )
+        cur = conn.execute(
+            f"UPDATE query_log SET {col} = {col} + 1 "
+            f"WHERE user_id = ? AND log_date = ? AND {col} < ?",
+            (user_id, log_date, limit),
+        )
+        if cur.rowcount == 0:
+            return None
         row = conn.execute(
-            "SELECT count FROM query_log WHERE user_id = ? AND log_date = ?",
-            (user_id, today),
+            f"SELECT {col} FROM query_log WHERE user_id = ? AND log_date = ?",
+            (user_id, log_date),
         ).fetchone()
-        return row["count"]
+        return row[0]
+
+
+def refund_query(db_path: str, user_id: int, log_date: str, *, quota: str = "free") -> None:
+    """Give back a reserved query that failed before producing an answer."""
+    col = _QUOTA_COLUMNS[quota]
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"UPDATE query_log SET {col} = {col} - 1 "
+            f"WHERE user_id = ? AND log_date = ? AND {col} > 0",
+            (user_id, log_date),
+        )

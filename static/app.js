@@ -378,7 +378,8 @@ async function handleSend() {
     const assistantText = await streamChat(text, bubble);
     if (assistantText) {
       state.history.push({ role: "user", content: text });
-      state.history.push({ role: "assistant", content: assistantText });
+      // The server rejects history messages over 10,000 characters
+      state.history.push({ role: "assistant", content: assistantText.slice(0, 10000) });
       if (state.history.length > 12) state.history = state.history.slice(-12);
     }
   } catch (err) {

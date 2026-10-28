@@ -4,24 +4,31 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+# Size limits bound what one request can cost on the server's LLM keys.
+# An assistant answer is capped at 1,500 tokens (about 7,500 characters).
+MAX_MESSAGE_CHARS = 4_000
+MAX_HISTORY_CHARS = 10_000
+MAX_HISTORY_MESSAGES = 24
+
+
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str
+    content: str = Field(max_length=MAX_HISTORY_CHARS)
 
 
 class SearchFilters(BaseModel):
-    house: str | None = None
+    house: str | None = Field(default=None, max_length=50)
     year_from: int | None = None
     year_to: int | None = None
-    member: str | None = None  # exact name: speaker, minister or questioner
+    member: str | None = Field(default=None, max_length=200)  # exact name: speaker, minister or questioner
     sort: Literal["relevance", "date"] = "relevance"
 
 
 class ChatRequest(BaseModel):
-    message: str
-    history: list[ChatMessage] = Field(default_factory=list)
-    model_key: str = "claude-haiku"
-    api_key: str | None = None  # BYOK — never stored server-side
+    message: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=MAX_HISTORY_MESSAGES)
+    model_key: str = Field(default="claude-haiku", max_length=50)
+    api_key: str | None = Field(default=None, max_length=500)  # BYOK — never stored server-side
     filters: SearchFilters = Field(default_factory=SearchFilters)
 
 

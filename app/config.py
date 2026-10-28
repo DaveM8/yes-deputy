@@ -35,6 +35,7 @@ class Settings:
     retrieval_num_candidates: int
     jwt_secret: str
     free_queries_per_day: int
+    byok_queries_per_day: int
     db_path: str
     # Email / admin portal
     smtp_host: str
@@ -58,6 +59,8 @@ class Settings:
         self.retrieval_num_candidates = int(os.environ.get("RETRIEVAL_NUM_CANDIDATES", "100"))
         self.jwt_secret = os.environ["JWT_SECRET"]
         self.free_queries_per_day = int(os.environ.get("FREE_QUERIES_PER_DAY", "10"))
+        # Own-key users pay for the LLM, but retrieval still uses our OpenAI key
+        self.byok_queries_per_day = int(os.environ.get("BYOK_QUERIES_PER_DAY", "200"))
         self.db_path = os.environ.get("DB_PATH", "data/users.db")
         # Email
         self.smtp_host = os.environ.get("SMTP_HOST", "")
