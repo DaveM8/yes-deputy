@@ -803,8 +803,13 @@ a.cite:hover { border-bottom-style: solid; }
 
 .card-link:hover { text-decoration: underline; }
 
-/* Wide tables in answers scroll sideways inside the bubble */
+/* Wide tables in answers scroll sideways inside the bubble. Cells wrap only
+   between words, so a narrow screen scrolls the table instead of squeezing
+   it down to one letter per line. */
 .table-scroll { overflow-x: auto; max-width: 100%; }
+.bubble.rendered .table-scroll table { width: max-content; min-width: 100%; }
+.bubble.rendered th,
+.bubble.rendered td { overflow-wrap: normal; word-break: normal; max-width: 22em; }
 
 /* ── Full-text source page (static/source.html) ── */
 body.source-page {
