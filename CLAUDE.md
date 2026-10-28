@@ -70,6 +70,22 @@ Requires a `.env` file (or environment variables) — see `app/config.py` for th
 
 **Production** (see `SETUP.md`): the live site (yesdeputy.com) runs behind nginx as the systemd service `yesdeputy`, from this directory. After code changes: `sudo systemctl restart yesdeputy`; logs via `sudo journalctl -u yesdeputy -f`.
 
+### Stable and beta sites
+| | Stable | Beta |
+|---|---|---|
+| URL | yesdeputy.com | beta.yesdeputy.com (admins only) |
+| Git branch | `main` | `beta` |
+| Directory | `/data/members_questions` | `/data/members_questions-beta` (a `git worktree` of this repo) |
+| Service / port | `yesdeputy` / 8000 | `yesdeputy-beta` / 8001, files in `deploy/` |
+| Settings | `.env` | `.env` plus `.env.beta` overrides (`deploy/env.beta.example`) |
+
+- **New features go on the `beta` branch, in the beta directory.** Don't edit this directory for feature work: the stable service runs straight from its working tree, so a stray edit plus a restart reaches real users.
+- **Shared between the sites:** the user accounts (`data/users.db`) and the Elasticsearch index. Beta keeps its own daily counts (`QUERY_LOG_TABLE=query_log_beta`). A beta feature that changes the database schema or the index mapping must use its own copy (a separate `DB_PATH` or `ES_INDEX`) until it's promoted.
+- **Beta-only settings:** `ADMIN_ONLY=1` refuses login, registration and tokens for non-admins, and `APP_ENV=beta` shows a BETA badge.
+- **Restart either site** by killing its main PID (`systemctl show <service> -p MainPID`); systemd restarts it.
+- **Promote:** merge `beta` into `main` here, then restart `yesdeputy`. Bring stable fixes into beta with `git merge main` in the beta directory.
+- **The nightly pipeline** (`run_pipeline.sh`, cron) runs only from the stable directory.
+
 ## Nightly incremental pipeline
 
 `run_pipeline.sh` is the end-to-end update job (cron, 02:00 daily; every step idempotent; logs to `pipeline_logs/`, keeps last 30). It takes `pipeline.lock` with `flock` and skips if the lock is held. Run long manual backfills as `flock pipeline.lock <command>` so the two never overlap.

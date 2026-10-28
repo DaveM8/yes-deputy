@@ -1,0 +1,20 @@
+# Beta site: beta.yesdeputy.com -> 127.0.0.1:8001
+# Install: sudo cp deploy/yesdeputy-beta.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now yesdeputy-beta
+[Unit]
+Description=Yes Deputy — beta (admins only)
+After=network.target elasticsearch.service
+
+[Service]
+User=dave
+WorkingDirectory=/data/members_questions-beta
+# Secrets come from the stable site's .env; .env.beta overrides a few settings
+# (later EnvironmentFile lines win).
+EnvironmentFile=/data/members_questions/.env
+EnvironmentFile=/data/members_questions-beta/.env.beta
+ExecStart=/data/members_questions-beta/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -36,5 +36,6 @@ async def health(request: Request) -> dict:
         "es_status": es_status,
         "doc_count": doc_count,
         "index": index,
+        "env": settings.app_env,
         "models": models,
     }

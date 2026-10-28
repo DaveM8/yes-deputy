@@ -77,6 +77,12 @@ async function init() {
   // Populate model dropdown. "paid" models need the user's own key.
   try {
     const health = await healthResp.json();
+    if (health.env && health.env !== "stable") {
+      const badge = document.createElement("span");
+      badge.className = "env-badge";
+      badge.textContent = health.env.toUpperCase();
+      document.querySelector(".nav-title").appendChild(badge);
+    }
     for (const m of health.models) {
       models[m.key] = m;
       const opt = document.createElement("option");

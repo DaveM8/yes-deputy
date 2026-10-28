@@ -47,6 +47,8 @@ class LoginRequest(BaseModel):
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest) -> dict:
+    if settings.admin_only:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Registration is closed on this site.")
     if get_user_by_email(settings.db_path, body.email):
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
     create_user(settings.db_path, body.email, hash_password(body.password))
@@ -66,6 +68,8 @@ def login(body: LoginRequest) -> dict:
     user = get_user_by_email(settings.db_path, body.email)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+    if settings.admin_only and not user["is_admin"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This site is open to admins only.")
     if not user["is_approved"]:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,

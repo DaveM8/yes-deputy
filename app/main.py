@@ -21,7 +21,7 @@ from app.retrieval import MemberIndex
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialise SQLite schema
-    init_db(settings.db_path)
+    init_db(settings.db_path, settings.query_log_table)
 
     # Initialise shared async clients
     es_kwargs: dict = {"hosts": [settings.es_host]}

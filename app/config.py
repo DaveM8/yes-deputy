@@ -47,6 +47,10 @@ class Settings:
     smtp_from: str
     admin_email: str | None
     site_url: str | None
+    # Beta site (beta.yesdeputy.com): see SETUP.md
+    app_env: str
+    admin_only: bool
+    query_log_table: str
 
     def __init__(self) -> None:
         self.es_host = os.environ.get("ES_HOST", "http://localhost:9200")
@@ -74,6 +78,9 @@ class Settings:
         self.smtp_from = os.environ.get("SMTP_FROM", "noreply@yesdeputy.com")
         self.admin_email = os.environ.get("ADMIN_EMAIL")
         self.site_url = os.environ.get("SITE_URL")
+        self.app_env = os.environ.get("APP_ENV", "stable")      # "beta" shows a BETA badge
+        self.admin_only = os.environ.get("ADMIN_ONLY", "") == "1"
+        self.query_log_table = os.environ.get("QUERY_LOG_TABLE", "query_log")
 
 
 settings = Settings()

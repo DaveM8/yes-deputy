@@ -4,14 +4,24 @@ Uses the stdlib sqlite3 — no ORM needed.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
+# Daily query counts live in this table. Beta sets QUERY_LOG_TABLE=query_log_beta so
+# testing on beta.yesdeputy.com doesn't use up the main site's quota; both share users.
+_LOG_TABLE = "query_log"
+_LOG_TABLE_RE = re.compile(r"^query_log(_[a-z0-9]+)?$")
 
-def init_db(db_path: str) -> None:
+
+def init_db(db_path: str, query_log_table: str = "query_log") -> None:
     """Create tables and run any pending migrations. Safe to call on every startup."""
+    global _LOG_TABLE
+    if not _LOG_TABLE_RE.match(query_log_table):
+        raise ValueError(f"Invalid query log table name: {query_log_table!r}")
+    _LOG_TABLE = query_log_table
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with _connect(db_path) as conn:
         conn.executescript("""
@@ -23,13 +33,14 @@ def init_db(db_path: str) -> None:
                 is_admin      INTEGER NOT NULL DEFAULT 0,
                 is_approved   INTEGER NOT NULL DEFAULT 0
             );
-
-            CREATE TABLE IF NOT EXISTS query_log (
+        """)
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {_LOG_TABLE} (
                 user_id  INTEGER NOT NULL REFERENCES users(id),
                 log_date TEXT    NOT NULL,
                 count    INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (user_id, log_date)
-            );
+            )
         """)
         # Migration: add is_approved column to existing databases
         cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
@@ -38,9 +49,9 @@ def init_db(db_path: str) -> None:
             # Existing users (created before approval was added) are pre-approved
             conn.execute("UPDATE users SET is_approved = 1")
         # Migration: separate daily count for searches made with the user's own API key
-        log_cols = {row[1] for row in conn.execute("PRAGMA table_info(query_log)")}
+        log_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({_LOG_TABLE})")}
         if "byok_count" not in log_cols:
-            conn.execute("ALTER TABLE query_log ADD COLUMN byok_count INTEGER NOT NULL DEFAULT 0")
+            conn.execute(f"ALTER TABLE {_LOG_TABLE} ADD COLUMN byok_count INTEGER NOT NULL DEFAULT 0")
 
 
 @contextmanager
@@ -106,7 +117,11 @@ def approve_user_by_id(db_path: str, user_id: int) -> bool:
 def delete_user(db_path: str, user_id: int) -> bool:
     """Delete a user and their query log. Returns True if found and deleted."""
     with _connect(db_path) as conn:
-        conn.execute("DELETE FROM query_log WHERE user_id = ?", (user_id,))
+        # Every site's counts (main and beta) share the users table
+        log_tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'query_log%'")]
+        for table in log_tables:
+            conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
         cur = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         return cur.rowcount > 0
 
@@ -125,7 +140,7 @@ def get_query_count(db_path: str, user_id: int) -> int:
     today = date.today().isoformat()
     with _connect(db_path) as conn:
         row = conn.execute(
-            "SELECT count FROM query_log WHERE user_id = ? AND log_date = ?",
+            f"SELECT count FROM {_LOG_TABLE} WHERE user_id = ? AND log_date = ?",
             (user_id, today),
         ).fetchone()
         return row["count"] if row else 0
@@ -149,19 +164,19 @@ def reserve_query(
     col = _QUOTA_COLUMNS[quota]
     with _connect(db_path) as conn:
         conn.execute(
-            "INSERT INTO query_log (user_id, log_date) VALUES (?, ?) "
+            f"INSERT INTO {_LOG_TABLE} (user_id, log_date) VALUES (?, ?) "
             "ON CONFLICT (user_id, log_date) DO NOTHING",
             (user_id, log_date),
         )
         cur = conn.execute(
-            f"UPDATE query_log SET {col} = {col} + 1 "
+            f"UPDATE {_LOG_TABLE} SET {col} = {col} + 1 "
             f"WHERE user_id = ? AND log_date = ? AND {col} < ?",
             (user_id, log_date, limit),
         )
         if cur.rowcount == 0:
             return None
         row = conn.execute(
-            f"SELECT {col} FROM query_log WHERE user_id = ? AND log_date = ?",
+            f"SELECT {col} FROM {_LOG_TABLE} WHERE user_id = ? AND log_date = ?",
             (user_id, log_date),
         ).fetchone()
         return row[0]
@@ -172,7 +187,7 @@ def refund_query(db_path: str, user_id: int, log_date: str, *, quota: str = "fre
     col = _QUOTA_COLUMNS[quota]
     with _connect(db_path) as conn:
         conn.execute(
-            f"UPDATE query_log SET {col} = {col} - 1 "
+            f"UPDATE {_LOG_TABLE} SET {col} = {col} - 1 "
             f"WHERE user_id = ? AND log_date = ? AND {col} > 0",
             (user_id, log_date),
         )

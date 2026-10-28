@@ -63,6 +63,9 @@ def get_current_user(
     user = get_user_by_id(settings.db_path, user_id)
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    # Both sites share JWT_SECRET, so a main-site token is valid here too
+    if settings.admin_only and not user["is_admin"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This site is open to admins only")
     return user
 
 
