@@ -51,6 +51,7 @@ from urllib.parse import urlparse
 import pymupdf
 
 from chunk_for_rag import make_chunk_id
+from update_bills import pdf_local_path
 
 MAX_CHARS        = 1500
 MIN_SECTION_CHARS = 300     # shorter sections are merged with the next one
@@ -455,7 +456,7 @@ def overview_text(bill: dict) -> str:
 def chunk_document(bill: dict, role: str, doc: dict, pdf_dir: Path,
                    max_chars: int = MAX_CHARS) -> list[dict]:
     uri = _pdf_uri(doc)
-    path = pdf_dir / urlparse(uri).path.lstrip("/")
+    path = pdf_local_path(uri, pdf_dir)       # validates host and containment
     if not path.exists():
         log.warning(f"Missing PDF {path}")
         return []

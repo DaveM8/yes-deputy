@@ -62,8 +62,22 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+PDF_HOST        = "data.oireachtas.ie"
+
+
 def pdf_local_path(url: str, pdf_dir: Path) -> Path:
-    return pdf_dir / urlparse(url).path.lstrip('/')
+    """
+    Local path mirroring the URL. URLs come from the API's JSON, so only
+    https://data.oireachtas.ie/... PDFs are accepted, and the path must stay
+    inside pdf_dir.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc != PDF_HOST or not parsed.path.endswith(".pdf"):
+        raise ValueError(f"Unexpected PDF URL: {url!r}")
+    local = (pdf_dir / parsed.path.lstrip('/')).resolve()
+    if ".." in Path(parsed.path).parts or not local.is_relative_to(pdf_dir.resolve()):
+        raise ValueError(f"PDF URL escapes {pdf_dir}: {url!r}")
+    return local
 
 
 def bill_documents(bill: dict) -> list[dict]:
@@ -82,8 +96,14 @@ def pdf_urls(bill: dict) -> list[str]:
         if doc.get("lang") not in WANTED_LANGS:
             continue
         uri = ((doc.get("formats") or {}).get("pdf") or {}).get("uri")
-        if uri:
-            urls.append(uri)
+        if not uri:
+            continue
+        try:
+            pdf_local_path(uri, Path("bills_pdf"))
+        except ValueError as e:
+            log.warning(f"Skipping {e}")
+            continue
+        urls.append(uri)
     return urls
 
 
