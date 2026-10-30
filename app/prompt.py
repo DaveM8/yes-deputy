@@ -19,6 +19,9 @@ INSTRUCTIONS:
 - If the question spans multiple years or departments, synthesise across sources.
 - Attribute what was said to the named speaker. Debate sources are labelled "Speaker"; \
 answers to parliamentary questions are labelled "Minister".
+- Bill and Act sources give the document's version (e.g. "As Initiated", "Act"); \
+say which version you are quoting and cite section numbers. A bill's text shows what \
+was proposed, not necessarily what became law.
 - Sources marked "ordered newest first" are the most recent matches, so the first one \
 answers questions like "when did X last speak".
 
@@ -32,6 +35,16 @@ _SPEECH_TEMPLATE = """\
 Date: {date} | House: {house}{committee}
 Section: {heading_path} ({section_type})
 Speaker: {speaker}{speaker_role}{table_label}
+Text:
+{text}
+"""
+
+_BILL_TEMPLATE = """\
+--- SOURCE {n} ---
+Date: {date} | Origin: {house}
+Legislation: {heading} ({version_label}; status: {bill_status})
+Sponsors: {sponsors}
+Section: {heading_path}
 Text:
 {text}
 """
@@ -52,6 +65,18 @@ def _format_source(n: int, card: SourceCard) -> str:
     if card.chunk_type == "table":
         caption = card.table_caption or "table"
         table_label = f"\n[TABLE: {caption}]"
+    if card.chunk_type in ("bill_text", "act_text", "bill_memo"):
+        return _BILL_TEMPLATE.format(
+            n=n,
+            date=card.date,
+            house=card.house,
+            heading=card.heading,
+            version_label=card.version_label or "unknown version",
+            bill_status=card.bill_status or "unknown",
+            sponsors=", ".join(card.sponsors) or "not listed",
+            heading_path=card.heading_path or card.heading,
+            text=card.text,
+        )
     if card.speaker:  # debate / committee speech (including tables inside speeches)
         return _SPEECH_TEMPLATE.format(
             n=n,

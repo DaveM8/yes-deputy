@@ -100,7 +100,7 @@ INDEX_MAPPING = {
                 "type": "integer"
             },
             "chunk_type": {
-                "type": "keyword"       # "answer_text" | "table" | "speech"
+                "type": "keyword"       # "answer_text" | "table" | "speech" | "bill_text" | "act_text" | "bill_memo"
             },
             # ── Debate metadata ────────────────────────────
             "date": {
@@ -117,7 +117,7 @@ INDEX_MAPPING = {
                 "type": "keyword"       # committee code from the path; "" for Dáil/Seanad
             },
             "doc_type": {
-                "type": "keyword"       # "debate" | "writtens"
+                "type": "keyword"       # "debate" | "writtens" | "bill"
             },
             "section_type": {
                 "type": "keyword"       # debateSection name: debate, questions, motion, ...
@@ -148,6 +148,39 @@ INDEX_MAPPING = {
             "asking_persons": {
                 "type":   "text",
                 "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
+            },
+            # ── Bills and Acts (chunk_bills.py) ─────────────
+            "bill_uri": {
+                "type": "keyword"
+            },
+            "bill_no": {
+                "type": "integer"
+            },
+            "bill_year": {
+                "type": "integer"
+            },
+            "bill_status": {
+                "type": "keyword"       # Current | Enacted | Lapsed | Withdrawn | ...
+            },
+            "bill_source": {
+                "type": "keyword"       # Government | Private Member
+            },
+            "sponsors": {
+                "type":   "text",
+                "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}
+            },
+            "version_label": {
+                "type": "keyword"       # "As Initiated", "Act", "Explanatory Memorandum", ...
+            },
+            "act_no": {
+                "type": "integer"
+            },
+            "pdf_url": {
+                "type":  "keyword",
+                "index": False
+            },
+            "page": {
+                "type": "integer"
             },
             # ── Speech metadata (chunk_type "speech") ──────
             "speaker": {

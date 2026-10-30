@@ -14,6 +14,8 @@
   --seanad-bg: #dbeafe;
   --committee-ink: #92400e;
   --committee-bg: #fef3c7;
+  --bill-ink: #6b21a8;
+  --bill-bg: #f3e8ff;
   --error: #dc2626;
   --error-bg: #fee2e2;
   --success: #16a34a;
@@ -415,6 +417,7 @@ body {
 .house-badge.dail  { background: var(--dail-bg);   color: var(--dail-green); }
 .house-badge.seanad { background: var(--seanad-bg); color: var(--seanad-blue); }
 .house-badge.committee { background: var(--committee-bg); color: var(--committee-ink); }
+.house-badge.legislation { background: var(--bill-bg); color: var(--bill-ink); }
 
 .date-chip {
   color: var(--text-muted);
@@ -876,6 +879,7 @@ body.source-page .nav-title { text-decoration: none; }
 }
 
 .source-link:hover { text-decoration: underline; }
+.source-link + .source-link { margin-left: 14px; }
 
 .source-passages { display: flex; flex-direction: column; gap: 10px; }
 

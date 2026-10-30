@@ -34,7 +34,7 @@ class ChatRequest(BaseModel):
 
 class SourceCard(BaseModel):
     chunk_id: str
-    chunk_type: Literal["answer_text", "table", "speech"]
+    chunk_type: Literal["answer_text", "table", "speech", "bill_text", "act_text", "bill_memo"]
     date: str
     house: str
     heading: str
@@ -53,3 +53,9 @@ class SourceCard(BaseModel):
     section_type: str = ""
     heading_path: str = ""
     committee: str = ""
+    # Bills and Acts (chunk_type bill_text / act_text / bill_memo)
+    version_label: str = ""
+    bill_status: str = ""
+    sponsors: list[str] = []
+    pdf_url: str = ""
+    page: int | None = None

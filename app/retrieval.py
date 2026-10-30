@@ -15,12 +15,14 @@ RRF_K = 60
 # How many hits each of kNN and BM25 contributes to the fusion
 FUSION_DEPTH = 50
 
-# Exact-name fields a member filter matches against: speeches, ministers, questioners
+# Exact-name fields a member filter matches against: speeches, ministers, questioners,
+# bill sponsors
 _PERSON_FIELDS = (
     "speaker.keyword",
     "speakers.keyword",
     "answering_person.keyword",
     "asking_persons.keyword",
+    "sponsors.keyword",
 )
 
 _SOURCE_FIELDS = [
@@ -29,6 +31,7 @@ _SOURCE_FIELDS = [
     "questions", "question_numbers",
     "chunk_type", "table_caption", "chunk_index",
     "speaker", "speaker_role", "section_type", "heading_path", "committee",
+    "version_label", "bill_status", "sponsors", "pdf_url", "page",
 ]
 
 
@@ -71,7 +74,7 @@ def _bm25_query(query: str, *, all_terms: bool = False) -> dict:
             "query": query,
             "fields": [
                 "text", "heading^2", "heading_path", "questions",
-                "speaker^3", "answering_person^3", "asking_persons^2",
+                "speaker^3", "answering_person^3", "asking_persons^2", "sponsors^2",
             ],
             "operator": "and" if all_terms else "or",
         }
@@ -101,6 +104,11 @@ def _hit_to_source_card(hit: dict, score: float) -> SourceCard:
         section_type=src.get("section_type") or "",
         heading_path=src.get("heading_path") or "",
         committee=src.get("committee") or "",
+        version_label=src.get("version_label") or "",
+        bill_status=src.get("bill_status") or "",
+        sponsors=src.get("sponsors") or [],
+        pdf_url=src.get("pdf_url") or "",
+        page=src.get("page"),
     )
 
 

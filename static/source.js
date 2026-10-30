@@ -38,20 +38,30 @@ function render(data) {
   document.getElementById("head").hidden = false;
 
   const house = document.getElementById("house");
-  house.className = "house-badge " + ({ "Dáil": "dail", "Seanad": "seanad" }[c.house] || "committee");
-  house.textContent = c.committee
-    ? c.committee.replace(/_/g, " ").replace(/^./, ch => ch.toUpperCase())
-    : c.house;
+  const legislation = { bill_text: "Bill", act_text: "Act", bill_memo: "Bill memo" }[c.chunk_type];
+  house.className = "house-badge " + (legislation ? "legislation"
+    : { "Dáil": "dail", "Seanad": "seanad" }[c.house] || "committee");
+  house.textContent = legislation
+    || (c.committee
+      ? c.committee.replace(/_/g, " ").replace(/^./, ch => ch.toUpperCase())
+      : c.house);
   document.getElementById("date").textContent = c.date;
-  document.getElementById("table-badge").hidden = c.chunk_type !== "table";
+  const badge = document.getElementById("table-badge");
+  badge.textContent = legislation ? c.version_label || "" : "TABLE";
+  badge.hidden = legislation ? !c.version_label : c.chunk_type !== "table";
 
   const heading = c.heading_path || c.heading || "(no heading)";
   document.getElementById("heading").textContent = heading;
   document.title = `${heading} — Yes Deputy`;
 
-  const person = c.speaker || c.answering_person || "";
-  const role = c.speaker ? c.speaker_role : c.answering_role;
-  document.getElementById("person").textContent = role ? `${person} · ${role}` : person;
+  if (legislation) {
+    document.getElementById("person").textContent =
+      [(c.sponsors || []).join(", "), c.bill_status].filter(Boolean).join(" · ");
+  } else {
+    const person = c.speaker || c.answering_person || "";
+    const role = c.speaker ? c.speaker_role : c.answering_role;
+    document.getElementById("person").textContent = role ? `${person} · ${role}` : person;
+  }
 
   const qList = document.getElementById("questions");
   qList.replaceChildren();
@@ -66,6 +76,11 @@ function render(data) {
   if (data.oireachtas_url) {
     link.href = data.oireachtas_url;
     link.hidden = false;
+  }
+  const pdf = document.getElementById("pdf-link");
+  if (c.pdf_url && c.pdf_url.startsWith("https://data.oireachtas.ie/")) {
+    pdf.href = c.page ? `${c.pdf_url}#page=${c.page}` : c.pdf_url;
+    pdf.hidden = false;
   }
 
   passagesEl.replaceChildren(

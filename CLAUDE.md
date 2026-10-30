@@ -195,6 +195,33 @@ Embeds with `text-embedding-3-small` (1536 dims) and bulk-indexes into Elasticse
 
 **Indices:** the app and the nightly pipeline use `ES_INDEX=oireachtas-search` (set in `.env`), an alias pointing to `oireachtas-chunks-v2`. The v2 mapping (`INDEX_MAPPING`) adds speech fields and **excludes `embedding` from `_source`** to halve storage. Consequence: v2's vectors can't be copied out with `_reindex`; a mapping change means re-embedding from the chunk files. The original `oireachtas-chunks` index (Q&A only, vectors in `_source`) is kept as a rollback target until v2 is verified. Person-name fields have `.keyword` sub-fields for exact filtering.
 
+**Bills index:** bill chunks live in `oireachtas-bills-v1` (same `INDEX_MAPPING`). Beta searches both through the alias `oireachtas-search-beta` → `[oireachtas-chunks-v2, oireachtas-bills-v1]`. Code that reads by ID must use an `ids` search, not `get`/`mget`, because those refuse an alias spanning several indices. To promote:
+- Add the bills index to `oireachtas-search`, with `is_write_index: true` on `oireachtas-chunks-v2` so the nightly debate pipeline keeps writing there.
+- Add the bill steps to `run_pipeline.sh`.
+
+### Stage 6 — Bills and Acts (PDF only)
+Bills, Acts and explanatory memoranda are published as PDF, not XML. They have their own scripts and their own index.
+```bash
+# Bill metadata (bills_metadata.jsonl, all ~6,000 bills, refetched each run) plus every
+# English/bilingual PDF (bills_pdf/, ~19k files, ~7 GB, skips files on disk):
+python update_bills.py --out-dir /data/members_questions
+
+# Chunk: per bill, the Act if enacted, else its latest version, plus the memo
+python chunk_bills.py --data-dir /data/members_questions --out bills_chunks.jsonl
+python chunk_bills.py --data-dir /data/members_questions --bill 2007/31 --out one.jsonl   # one bill
+python chunk_bills.py --data-dir /data/members_questions --sample 40 --out sample.jsonl   # spot-check
+
+python embed_and_index.py --chunks bills_chunks.jsonl --index oireachtas-bills-v1 ...
+```
+- **Extraction** (PyMuPDF): words outside the page's body column are dropped. That removes margin notes and line numbers, which OCR in pre-1990s scans often merges into the text. Running headers repeated across pages are removed, and so is the Irish text at the end of recent bills (from its "dá ngairtear" long title on).
+- **Chunking:**
+  - Text after "Be it enacted" is split at section starts (`3.—(1)`, or `3.` on its own line in recent bills). Section numbers must run in order, so numbered lists in Schedules don't start sections.
+  - Section titles come from the line above the section or from the contents list.
+  - Chunk text is prefixed `"{title}, section N (heading): "`. Chunk 0 is an overview built from the API metadata (long title, sponsors, stages, status, Act number).
+  - Memos, and bills with no recognisable sections, are packed by page.
+- **IDs:** `record_id = sha256("bill|{document uri}")` with the usual `make_chunk_id`, so `/api/sources` neighbours work. When a bill reaches a new version, its chunks get a new `record_id`; delete the old version's chunks by `bill_uri` and `record_id`.
+- **Not indexed yet:** amendment lists (downloaded), Irish-language versions, and the earlier versions of each bill.
+
 ### Analysis
 `stats.py` is an exploratory Polars script that reads `written_answers.parquet` directly. Run it as a script or paste sections into IPython.
 
@@ -218,6 +245,12 @@ Each record in the Parquet/Elasticsearch index represents one **debate section**
 | `answer_clean` | string | Answer text with housekeeping phrases stripped |
 
 **Chunk index documents** (`oireachtas-chunks-v2`) carry the Q&A fields above per chunk (`answering_person`, `asking_persons`, `questions`, …) and add `chunk_type` (`answer_text` | `table` | `speech`), `committee` (committee code, empty for Dáil/Seanad), `doc_type` (`debate` | `writtens`), `section_type` (AKN section `name`: debate, questions, motion, statement, topical, …) and `heading_path` (nested headings joined with ` > `). Speech chunks also have `speaker`, `speaker_role` and `speakers` (everyone in a merged exchange). `house` is `Dáil`, `Seanad` or `Committee`.
+
+**Bill chunks** (`oireachtas-bills-v1`) have `doc_type` `bill`, `chunk_type` `bill_text` | `act_text` | `bill_memo`, `section_type` (`overview` | `section` | `schedule` | `preamble` | `memo` | `text`) and `house` = the origin house. They add:
+- `bill_uri`, `bill_no`, `bill_year`, `act_no`;
+- `bill_status`, `bill_source` (Government / Private Member);
+- `sponsors` (with `.keyword`, which the `member` filter matches);
+- `version_label` ("As Initiated", "Act", …), `pdf_url` and `page`.
 
 ## XML format notes
 
@@ -263,6 +296,8 @@ Two tables: `users` (auth + approval) and `query_log` (daily per-user count). `i
 Plain HTML/JS, no build step. `index.html` + `app.js` are the main research interface (SSE consumer for `/api/chat`); `auth.html` is login/register; `admin.html` is the user management panel (inline JS); `source.html` + `source.js` is the full-text page opened from a card's "Read full text ↗".
 
 Each answer bubble keeps its own source cards (`bubble._cards`). "Source 3" in a rendered answer becomes an `a.cite` link that re-shows that answer's cards and highlights card 3. At ≤768 px the nav controls fold into a Settings panel and a Chat | Sources switcher (`.main[data-view]`) shows one panel at a time.
+
+Bill chunks show a "Bill"/"Act"/"Bill memo" badge, the version, the sponsors and status, and a "PDF ↗" link that opens at the chunk's page, on both the card and the source page.
 
 ### SSE event protocol (`/api/chat`)
 The chat endpoint streams Server-Sent Events in this order:

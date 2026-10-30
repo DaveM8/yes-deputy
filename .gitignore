@@ -54,3 +54,11 @@ chunks_all.jsonl
 chunks_pipeline.jsonl
 pipeline.lock
 backfill_run*.out
+
+# Bills and Acts (PDF), shared with stable via --out-dir
+bills_pdf/
+bills_metadata.jsonl
+bills_chunks*.jsonl
+bills_failed_urls.txt
+update_bills.log
+chunk_bills.log

@@ -262,8 +262,13 @@ function renderSourceCards(cards) {
   });
 }
 
+// Bill and Act chunks get a "Bill"/"Act" badge in place of the house
+const LEGISLATION_BADGE = { bill_text: "Bill", act_text: "Act", bill_memo: "Bill memo" };
+
 function buildSourceCard(card, n) {
-  const houseClass = { "Dáil": "dail", "Seanad": "seanad" }[card.house] || "committee";
+  const legislation = LEGISLATION_BADGE[card.chunk_type];
+  const houseClass = legislation ? "legislation"
+    : { "Dáil": "dail", "Seanad": "seanad" }[card.house] || "committee";
   const scorePercent = Math.round(card.score * 100);
 
   const el = document.createElement("div");
@@ -279,9 +284,10 @@ function buildSourceCard(card, n) {
   const houseBadge = document.createElement("span");
   houseBadge.className = `house-badge ${houseClass}`;
   // Committee codes look like "committee_of_public_accounts"
-  houseBadge.textContent = card.committee
-    ? card.committee.replace(/_/g, " ").replace(/^./, c => c.toUpperCase())
-    : card.house;
+  houseBadge.textContent = legislation
+    || (card.committee
+      ? card.committee.replace(/_/g, " ").replace(/^./, c => c.toUpperCase())
+      : card.house);
 
   const dateChip = document.createElement("span");
   dateChip.className = "date-chip";
@@ -291,10 +297,10 @@ function buildSourceCard(card, n) {
   header.appendChild(houseBadge);
   header.appendChild(dateChip);
 
-  if (card.chunk_type === "table") {
+  if (card.chunk_type === "table" || (legislation && card.version_label)) {
     const tableBadge = document.createElement("span");
     tableBadge.className = "table-badge";
-    tableBadge.textContent = "TABLE";
+    tableBadge.textContent = legislation ? card.version_label : "TABLE";
     header.appendChild(tableBadge);
   }
 
@@ -305,9 +311,14 @@ function buildSourceCard(card, n) {
   const minister = document.createElement("div");
   minister.className = "card-minister";
   // Debate/committee speeches name the speaker; PQ answers name the minister
-  const person = card.speaker || card.answering_person;
-  const role = card.speaker ? card.speaker_role : card.answering_role;
-  minister.textContent = role ? `${person} · ${role}` : person;
+  if (legislation) {
+    const sponsors = (card.sponsors || []).join(", ");
+    minister.textContent = [sponsors, card.bill_status].filter(Boolean).join(" · ");
+  } else {
+    const person = card.speaker || card.answering_person;
+    const role = card.speaker ? card.speaker_role : card.answering_role;
+    minister.textContent = role ? `${person} · ${role}` : person;
+  }
 
   const excerpt = document.createElement("div");
   excerpt.className = "card-excerpt";
@@ -344,6 +355,16 @@ function buildSourceCard(card, n) {
   el.appendChild(excerpt);
   if (card.excerpt && card.excerpt.length >= 295) el.appendChild(showMore);
   el.appendChild(fullText);
+  if (card.pdf_url && card.pdf_url.startsWith("https://data.oireachtas.ie/")) {
+    const pdf = document.createElement("a");
+    pdf.className = "card-link";
+    pdf.href = card.page ? `${card.pdf_url}#page=${card.page}` : card.pdf_url;
+    pdf.target = "_blank";
+    pdf.rel = "noopener";
+    pdf.textContent = "PDF ↗";
+    pdf.addEventListener("click", e => e.stopPropagation());
+    el.appendChild(pdf);
+  }
   el.appendChild(bar);
   return el;
 }

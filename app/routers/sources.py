@@ -23,6 +23,7 @@ _FIELDS = [
     "section_id", "section_type", "chunk_type", "chunk_index", "record_id",
     "speaker", "speaker_role", "answering_person", "answering_role",
     "department_role", "questions", "question_numbers", "table_caption",
+    "version_label", "bill_status", "sponsors", "pdf_url", "page", "bill_uri",
 ]
 
 
@@ -33,6 +34,10 @@ def _chunk_id(record_id: str, chunk_index: int) -> str:
 
 def _oireachtas_url(src: dict) -> str | None:
     """Link to the section on oireachtas.ie, or None if it can't be built."""
+    bill_uri = src.get("bill_uri") or ""
+    if bill_uri.startswith("https://data.oireachtas.ie/ie/oireachtas/bill/"):
+        year_no = bill_uri.rstrip("/").rsplit("/", 2)[-2:]
+        return f"https://www.oireachtas.ie/en/bills/bill/{year_no[0]}/{year_no[1]}/"
     date = src.get("date")
     if not date:
         return None
@@ -84,9 +89,13 @@ async def get_source(
         wanted = [i for i in range(idx - before, idx + after + 1) if i >= 0 and i != idx]
     if wanted:
         ids = {_chunk_id(record_id, i): i for i in wanted}
-        mget = await es.mget(index=index, ids=list(ids), source=_FIELDS)
+        # A search rather than mget: mget refuses an alias that spans several
+        # indices (debates and bills)
+        resp = await es.search(
+            index=index, query={"ids": {"values": list(ids)}}, source=_FIELDS, size=len(ids),
+        )
         found = sorted(
-            (ids[d["_id"]], d["_id"], d["_source"]) for d in mget["docs"] if d.get("found")
+            (ids[h["_id"]], h["_id"], h["_source"]) for h in resp["hits"]["hits"]
         )
         before_chunks = [_public(cid, s) for i, cid, s in found if i < idx]
         after_chunks = [_public(cid, s) for i, cid, s in found if i > idx]
