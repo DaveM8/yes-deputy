@@ -32,23 +32,32 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 # ── JWT ────────────────────────────────────────────────────────────────────
 
-def create_token(user_id: int) -> str:
+def create_token(user: dict) -> str:
     payload = {
-        "sub": str(user_id),
+        "sub": str(user["id"]),
+        # A password change bumps token_version, which retires every older token
+        "ver": user["token_version"],
         "exp": datetime.now(timezone.utc) + timedelta(days=_TOKEN_EXPIRE_DAYS),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=_JWT_ALGORITHM)
 
 
-def decode_token(token: str) -> int:
-    """Return user_id or raise HTTPException."""
+def decode_token(token: str) -> dict:
+    """Return the user the token belongs to, or raise HTTPException."""
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[_JWT_ALGORITHM])
-        return int(payload["sub"])
+        user_id = int(payload["sub"])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+    user = get_user_by_id(settings.db_path, user_id)
+    if not user:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    # Tokens issued before "ver" existed count as version 0
+    if payload.get("ver", 0) != user["token_version"]:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expired, please sign in again")
+    return user
 
 
 # ── FastAPI dependency ─────────────────────────────────────────────────────
@@ -59,10 +68,7 @@ def get_current_user(
     """Dependency: resolve JWT → user dict. Raises 401 if missing/invalid."""
     if not credentials:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
-    user_id = decode_token(credentials.credentials)
-    user = get_user_by_id(settings.db_path, user_id)
-    if not user:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    user = decode_token(credentials.credentials)
     # Both sites share JWT_SECRET, so a main-site token is valid here too
     if settings.admin_only and not user["is_admin"]:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This site is open to admins only")
@@ -85,7 +91,6 @@ def get_optional_user(
     if not credentials:
         return None
     try:
-        user_id = decode_token(credentials.credentials)
-        return get_user_by_id(settings.db_path, user_id)
+        return decode_token(credentials.credentials)
     except HTTPException:
         return None

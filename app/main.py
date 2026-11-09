@@ -85,6 +85,11 @@ async def login_page():
     return _page("static/auth.html")
 
 
+@app.get("/account")
+async def account_page():
+    return _page("static/account.html")
+
+
 @app.get("/admin")
 async def admin_page():
     return _page("static/admin.html")

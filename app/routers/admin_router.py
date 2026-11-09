@@ -6,11 +6,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.auth import require_admin
 from app.config import settings
-from app.database import approve_user_by_id, delete_user, list_users
+from app.database import approve_user_by_id, delete_user, get_user_by_id, list_users
+from app.email_service import send_account_approved
 
 router = APIRouter(prefix="/api/admin")
 
@@ -29,11 +30,17 @@ def admin_list_users(
 def admin_approve_user(
     user_id: int,
     _admin: Annotated[dict, Depends(require_admin)],
+    background: BackgroundTasks,
 ) -> dict:
-    """Approve a pending user by ID."""
-    if not approve_user_by_id(settings.db_path, user_id):
+    """Approve a pending user by ID, and email them that they can sign in."""
+    user = get_user_by_id(settings.db_path, user_id)
+    if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-    return {"status": "approved", "user_id": user_id}
+    # Only the first approval sends the email, so a double click doesn't send two
+    emailed = approve_user_by_id(settings.db_path, user_id)
+    if emailed:
+        background.add_task(send_account_approved, user["email"])
+    return {"status": "approved", "user_id": user_id, "emailed": emailed}
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_200_OK)

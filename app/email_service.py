@@ -15,6 +15,9 @@ from app.config import settings
 
 log = logging.getLogger(__name__)
 
+# Seconds before giving up on a stalled SMTP server, so send threads can't pile up
+_SMTP_TIMEOUT = 15
+
 
 def _send_sync(to: str, subject: str, html: str, text: str) -> None:
     """Blocking SMTP send — called via asyncio.to_thread."""
@@ -27,13 +30,13 @@ def _send_sync(to: str, subject: str, html: str, text: str) -> None:
 
     if settings.smtp_port == 465:
         # Implicit TLS
-        with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port) as server:
+        with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=_SMTP_TIMEOUT) as server:
             if settings.smtp_user and settings.smtp_pass:
                 server.login(settings.smtp_user, settings.smtp_pass)
             server.sendmail(settings.smtp_from, to, msg.as_string())
     else:
         # Plain or STARTTLS (port 25 / 587)
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=_SMTP_TIMEOUT) as server:
             server.ehlo()
             if settings.smtp_port == 587:
                 server.starttls()
@@ -55,58 +58,140 @@ async def send_email(to: str, subject: str, html: str, text: str) -> None:
         log.error("Failed to send email to %s: %s", to, exc)
 
 
-async def notify_admin_new_user(user_email: str) -> None:
-    """Notify the admin that a new user is awaiting approval."""
-    if not settings.admin_email:
-        log.debug("ADMIN_EMAIL not configured — skipping admin notification")
-        return
+def _site_link(path: str) -> str:
+    return (settings.site_url or "").rstrip("/") + path
 
-    portal_url = (settings.site_url.rstrip("/") + "/admin") if settings.site_url else "/admin"
-    safe_email = html_lib.escape(user_email, quote=True)
-    safe_portal_url = html_lib.escape(portal_url, quote=True)
 
-    subject = f"[Yes Deputy] New user awaiting approval: {user_email}"
-
-    text = (
-        f"A new user has registered on Yes Deputy and is awaiting your approval.\n\n"
-        f"Email: {user_email}\n\n"
-        f"Open the admin portal to approve or reject this user:\n{portal_url}\n"
+def _render(heading: str, paragraphs: list[str], button_text: str | None = None,
+            button_url: str | None = None) -> tuple[str, str]:
+    """
+    Build the (html, text) bodies of an account email. Paragraphs are plain
+    text and are escaped here. The link is also written out in full, for mail
+    clients that strip buttons.
+    """
+    esc = lambda v: html_lib.escape(v, quote=True)
+    text_parts = [heading, ""] + [p + "\n" for p in paragraphs]
+    paras_html = "".join(
+        f'<p style="color: #374151; margin: 0 0 16px; font-size: 0.92rem; line-height: 1.5;">{esc(p)}</p>'
+        for p in paragraphs
     )
-
+    button_html = ""
+    if button_text and button_url:
+        text_parts.append(f"{button_text}:\n{button_url}\n")
+        button_html = f"""
+    <a href="{esc(button_url)}"
+       style="display: inline-block; padding: 11px 24px; background: #4f46e5;
+              color: #fff; text-decoration: none; border-radius: 6px;
+              font-weight: 600; font-size: 0.92rem;">{esc(button_text)}</a>
+    <p style="color: #6b7280; margin: 20px 0 0; font-size: 0.78rem; word-break: break-all;">
+      Or open this link: {esc(button_url)}
+    </p>"""
+    text_parts.append("Yes Deputy, Oireachtas research tool")
     html = f"""<!DOCTYPE html>
 <html>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
              background: #f4f6fb; margin: 0; padding: 20px;">
   <div style="max-width: 520px; margin: 0 auto; background: #fff;
-              border-radius: 10px; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-    <h2 style="margin: 0 0 8px; color: #1a1d2e; font-size: 1.2rem;">
-      New User Registration
-    </h2>
-    <p style="color: #6b7280; margin: 0 0 24px; font-size: 0.9rem;">
-      Someone has registered on <strong>Yes Deputy</strong> and is waiting for access.
-    </p>
-    <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
-      <tr>
-        <td style="padding: 10px 12px; background: #f0f2f8; font-weight: 600;
-                   font-size: 0.85rem; color: #1a1d2e; border-radius: 6px 0 0 6px;
-                   white-space: nowrap; width: 1%;">Email</td>
-        <td style="padding: 10px 12px; border: 1px solid #dde1ef; border-left: none;
-                   font-size: 0.9rem; color: #1a1d2e; border-radius: 0 6px 6px 0;">
-          {safe_email}
-        </td>
-      </tr>
-    </table>
-    <a href="{safe_portal_url}"
-       style="display: inline-block; padding: 12px 28px; background: #4f46e5;
-              color: #fff; text-decoration: none; border-radius: 7px;
-              font-weight: 700; font-size: 0.95rem; letter-spacing: -0.01em;">
-      Open Admin Portal →
-    </a>
+              border-radius: 8px; padding: 32px; border: 1px solid #dde1ef;">
+    <h2 style="margin: 0 0 16px; color: #1a1d2e; font-size: 1.15rem;">{esc(heading)}</h2>
+    {paras_html}{button_html}
     <p style="color: #9ca3af; font-size: 0.78rem; margin: 28px 0 0;">
-      Yes Deputy — Oireachtas Research Tool
+      Yes Deputy, Oireachtas research tool
     </p>
   </div>
 </body>
 </html>"""
+    return html, "\n".join(text_parts)
 
-    await send_email(settings.admin_email, subject, html, text)
+
+async def notify_admin_new_user(user_email: str) -> None:
+    """Tell the admin that a user has confirmed their address and is awaiting approval."""
+    if not settings.admin_email:
+        log.debug("ADMIN_EMAIL not configured — skipping admin notification")
+        return
+    html, text = _render(
+        "New user awaiting approval",
+        [f"{user_email} has registered and confirmed their email address."],
+        "Open the admin portal", _site_link("/admin"),
+    )
+    await send_email(settings.admin_email, f"[Yes Deputy] New user awaiting approval: {user_email}",
+                     html, text)
+
+
+# ── Emails to users ────────────────────────────────────────────────────────
+# Tokens go in the URL fragment (#...), which browsers never send to the
+# server, so they stay out of access logs. The page then POSTs the token.
+
+async def send_verification(to: str, token: str) -> None:
+    html, text = _render(
+        "Confirm your email address",
+        ["Thanks for registering with Yes Deputy. Please confirm this is your email address.",
+         "After that, an admin will review your account, and we'll email you when it's approved.",
+         "The link works for 48 hours. If you didn't register, ignore this email."],
+        "Confirm email address", _site_link(f"/login#verify={token}"),
+    )
+    await send_email(to, "Yes Deputy: confirm your email address", html, text)
+
+
+async def send_already_registered(to: str, token: str) -> None:
+    html, text = _render(
+        "You already have an account",
+        ["Someone, probably you, tried to register on Yes Deputy with this email address, "
+         "but it already has an account.",
+         "If you've forgotten your password, you can set a new one with the link below. "
+         "It works for 1 hour. Otherwise, ignore this email."],
+        "Set a new password", _site_link(f"/login#reset={token}"),
+    )
+    await send_email(to, "Yes Deputy: you already have an account", html, text)
+
+
+async def send_password_reset(to: str, token: str) -> None:
+    html, text = _render(
+        "Reset your password",
+        ["We received a request to reset the password for your Yes Deputy account.",
+         "The link works for 1 hour and can be used once. If you didn't ask for this, "
+         "ignore this email; your password hasn't changed."],
+        "Set a new password", _site_link(f"/login#reset={token}"),
+    )
+    await send_email(to, "Yes Deputy: reset your password", html, text)
+
+
+async def send_password_changed(to: str) -> None:
+    html, text = _render(
+        "Your password was changed",
+        ["The password for your Yes Deputy account was just changed, and other devices "
+         "have been signed out.",
+         "If this wasn't you, reset your password straight away."],
+        "Reset password", _site_link("/login#forgot"),
+    )
+    await send_email(to, "Yes Deputy: your password was changed", html, text)
+
+
+async def send_account_approved(to: str) -> None:
+    html, text = _render(
+        "Your account is approved",
+        ["Your Yes Deputy account has been approved. You can now sign in."],
+        "Sign in", _site_link("/login"),
+    )
+    await send_email(to, "Yes Deputy: your account is approved", html, text)
+
+
+async def send_delete_confirmation(to: str, token: str) -> None:
+    html, text = _render(
+        "Confirm account deletion",
+        ["We received a request to delete your Yes Deputy account. Deleting it removes your "
+         "account and usage history and can't be undone.",
+         "The link works for 1 hour. If you didn't ask for this, ignore this email and "
+         "consider changing your password."],
+        "Delete my account", _site_link(f"/login#delete={token}"),
+    )
+    await send_email(to, "Yes Deputy: confirm account deletion", html, text)
+
+
+async def send_account_deleted(to: str) -> None:
+    html, text = _render(
+        "Your account has been deleted",
+        ["Your Yes Deputy account and its usage history have been deleted. "
+         "You're welcome to register again at any time."],
+    )
+    await send_email(to, "Yes Deputy: your account has been deleted", html, text)

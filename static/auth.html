@@ -6,7 +6,7 @@
   <title>Yes Deputy — Sign in</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="/static/style.css?v=4">
+  <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 
@@ -18,13 +18,13 @@
       and their answers, going back decades.
     </p>
 
-    <div class="auth-tabs">
+    <div class="auth-tabs" id="auth-tabs">
       <div class="auth-tab active" data-tab="login">Sign in</div>
       <div class="auth-tab" data-tab="register">Create account</div>
     </div>
 
     <div id="auth-error" class="auth-error"></div>
-  <div id="auth-pending" class="auth-pending" style="display:none"></div>
+    <div id="auth-pending" class="auth-pending" style="display:none"></div>
 
     <!-- Login form -->
     <form class="auth-form" id="login-form" autocomplete="on">
@@ -39,6 +39,8 @@
                placeholder="••••••••" autocomplete="current-password" required>
       </div>
       <button class="submit-btn" type="submit">Sign in</button>
+      <button class="link-btn" type="button" id="resend-btn" hidden>Send the confirmation link again</button>
+      <button class="link-btn" type="button" data-view="forgot">Forgot your password?</button>
     </form>
 
     <!-- Register form -->
@@ -60,49 +62,94 @@
       </div>
       <button class="submit-btn" type="submit">Create account</button>
     </form>
+
+    <!-- Forgotten password: ask for a reset link -->
+    <form class="auth-form hidden" id="forgot-form" autocomplete="on">
+      <p class="auth-note">Enter your email address and we'll send you a link to set a new password.</p>
+      <div>
+        <label class="form-label" for="forgot-email">Email</label>
+        <input class="form-input" id="forgot-email" type="email"
+               placeholder="you@example.com" autocomplete="email" required>
+      </div>
+      <button class="submit-btn" type="submit">Send reset link</button>
+      <button class="link-btn" type="button" data-view="login">Back to sign in</button>
+    </form>
+
+    <!-- Opened from a reset email (#reset=token) -->
+    <form class="auth-form hidden" id="reset-form">
+      <p class="auth-note">Choose a new password. Other devices will be signed out.</p>
+      <div>
+        <label class="form-label" for="reset-password">New password</label>
+        <input class="form-input" id="reset-password" type="password"
+               placeholder="At least 8 characters" autocomplete="new-password" required>
+      </div>
+      <div>
+        <label class="form-label" for="reset-confirm">Confirm new password</label>
+        <input class="form-input" id="reset-confirm" type="password"
+               placeholder="••••••••" autocomplete="new-password" required>
+      </div>
+      <button class="submit-btn" type="submit">Set new password</button>
+    </form>
+
+    <!-- Opened from a deletion email (#delete=token) -->
+    <form class="auth-form hidden" id="delete-form">
+      <p class="auth-note">
+        This permanently deletes your Yes Deputy account and its usage history.
+        It can't be undone.
+      </p>
+      <button class="submit-btn danger" type="submit">Delete my account</button>
+      <button class="link-btn" type="button" data-view="login">Cancel</button>
+    </form>
   </div>
 </div>
 
 <script>
-  // If already logged in, go to the app
-  if (localStorage.getItem("jwt_token")) {
-    window.location.replace("/");
+  const FORMS = ["login", "register", "forgot", "reset", "delete"];
+  // The token from an emailed link, for the reset and delete forms
+  let linkToken = null;
+
+  function showView(which) {
+    hideMessages();
+    FORMS.forEach(f =>
+      document.getElementById(f + "-form").classList.toggle("hidden", f !== which));
+    // Tabs only make sense between sign-in and registration
+    document.getElementById("auth-tabs").hidden = !(which === "login" || which === "register");
+    document.querySelectorAll(".auth-tab").forEach(t =>
+      t.classList.toggle("active", t.dataset.tab === which));
   }
 
-  // Tab switching
-  document.querySelectorAll(".auth-tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
-      tab.classList.add("active");
-      const which = tab.dataset.tab;
-      document.getElementById("login-form").classList.toggle("hidden", which !== "login");
-      document.getElementById("register-form").classList.toggle("hidden", which !== "register");
-      hideError();
-    });
-  });
+  function hideMessages() {
+    document.getElementById("auth-error").classList.remove("show");
+    document.getElementById("auth-pending").style.display = "none";
+    document.getElementById("resend-btn").hidden = true;
+  }
 
   function showError(msg) {
-    document.getElementById("auth-pending").style.display = "none";
+    hideMessages();
     const el = document.getElementById("auth-error");
     el.textContent = msg;
     el.classList.add("show");
   }
 
-  function hideError() {
-    document.getElementById("auth-error").classList.remove("show");
-  }
-
-  function showPending(msg) {
-    hideError();
+  function showNotice(msg) {
+    hideMessages();
     const el = document.getElementById("auth-pending");
     el.textContent = msg;
     el.style.display = "block";
-    // Hide both forms so user knows they're done
-    document.getElementById("register-form").classList.add("hidden");
   }
 
-  async function submitAuth(url, body, btn) {
-    hideError();
+  // FastAPI errors come as a string, a {code, message} object, or (for a failed
+  // field check) a list whose messages start "Value error, "
+  function errorText(data) {
+    const d = data && data.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d) && d.length) return String(d[0].msg || "").replace(/^Value error, /, "");
+    if (d && d.message) return d.message;
+    return "Something went wrong";
+  }
+
+  async function post(url, body, btn, label) {
+    hideMessages();
     btn.disabled = true;
     btn.textContent = "Please wait…";
     try {
@@ -111,54 +158,144 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await resp.json();
-      if (!resp.ok) {
-        showError(data.detail || "Something went wrong");
-        return;
-      }
-      // Register returns {status:"pending"}, login returns {token:"..."}
-      if (data.status === "pending") {
-        showPending(data.message);
-        return;
-      }
-      localStorage.setItem("jwt_token", data.token);
-      const next = new URLSearchParams(window.location.search).get("next");
-      let safe = "/";
-      if (next) {
-        try {
-          const u = new URL(next, window.location.origin);
-          if (u.origin === window.location.origin && !u.pathname.startsWith("//")) {
-            safe = u.href;
-          }
-        } catch {}
-      }
-      window.location.replace(safe);
+      const data = await resp.json().catch(() => ({}));
+      return { ok: resp.ok, data };
     } catch {
-      showError("Network error — please try again");
+      return { ok: false, data: { detail: "Network error — please try again" } };
     } finally {
       btn.disabled = false;
-      btn.textContent = url.includes("login") ? "Sign in" : "Create account";
+      btn.textContent = label;
     }
   }
 
-  document.getElementById("login-form").addEventListener("submit", e => {
+  function goToApp() {
+    const next = new URLSearchParams(window.location.search).get("next");
+    let safe = "/";
+    if (next) {
+      try {
+        const u = new URL(next, window.location.origin);
+        if (u.origin === window.location.origin && !u.pathname.startsWith("//")) {
+          safe = u.href;
+        }
+      } catch {}
+    }
+    window.location.replace(safe);
+  }
+
+  document.querySelectorAll(".auth-tab").forEach(tab =>
+    tab.addEventListener("click", () => showView(tab.dataset.tab)));
+  document.querySelectorAll(".link-btn[data-view]").forEach(btn =>
+    btn.addEventListener("click", () => showView(btn.dataset.view)));
+
+  document.getElementById("login-form").addEventListener("submit", async e => {
     e.preventDefault();
-    submitAuth("/api/auth/login", {
+    const { ok, data } = await post("/api/auth/login", {
       email: document.getElementById("login-email").value,
       password: document.getElementById("login-password").value,
-    }, e.submitter);
+    }, e.submitter, "Sign in");
+    if (!ok) {
+      showError(errorText(data));
+      if (data.detail && data.detail.code === "email_unverified") {
+        document.getElementById("resend-btn").hidden = false;
+      }
+      return;
+    }
+    localStorage.setItem("jwt_token", data.token);
+    goToApp();
   });
 
-  document.getElementById("register-form").addEventListener("submit", e => {
+  document.getElementById("resend-btn").addEventListener("click", async e => {
+    const { ok, data } = await post("/api/auth/resend-verification", {
+      email: document.getElementById("login-email").value,
+    }, e.currentTarget, "Send the confirmation link again");
+    ok ? showNotice(data.message) : showError(errorText(data));
+  });
+
+  document.getElementById("register-form").addEventListener("submit", async e => {
     e.preventDefault();
     const pw = document.getElementById("reg-password").value;
-    const confirm = document.getElementById("reg-confirm").value;
-    if (pw !== confirm) { showError("Passwords do not match"); return; }
-    submitAuth("/api/auth/register", {
+    if (pw !== document.getElementById("reg-confirm").value) {
+      showError("Passwords do not match");
+      return;
+    }
+    const { ok, data } = await post("/api/auth/register", {
       email: document.getElementById("reg-email").value,
       password: pw,
-    }, e.submitter);
+    }, e.submitter, "Create account");
+    if (!ok) { showError(errorText(data)); return; }
+    document.getElementById("register-form").classList.add("hidden");
+    showNotice(data.message);
   });
+
+  document.getElementById("forgot-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const { ok, data } = await post("/api/auth/forgot-password", {
+      email: document.getElementById("forgot-email").value,
+    }, e.submitter, "Send reset link");
+    ok ? showNotice(data.message) : showError(errorText(data));
+  });
+
+  document.getElementById("reset-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const pw = document.getElementById("reset-password").value;
+    if (pw !== document.getElementById("reset-confirm").value) {
+      showError("Passwords do not match");
+      return;
+    }
+    const { ok, data } = await post("/api/auth/reset-password",
+      { token: linkToken, password: pw }, e.submitter, "Set new password");
+    if (!ok) { showError(errorText(data)); return; }
+    // Any saved session is now invalid
+    localStorage.removeItem("jwt_token");
+    showView("login");
+    showNotice(data.message);
+  });
+
+  document.getElementById("delete-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const { ok, data } = await post("/api/auth/delete-account/confirm",
+      { token: linkToken }, e.submitter, "Delete my account");
+    if (!ok) { showError(errorText(data)); return; }
+    localStorage.removeItem("jwt_token");
+    document.getElementById("delete-form").classList.add("hidden");
+    showNotice(data.message);
+  });
+
+  async function verifyEmail(token) {
+    showView("login");
+    showNotice("Confirming your email address…");
+    try {
+      const resp = await fetch("/api/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      resp.ok ? showNotice(data.message) : showError(errorText(data));
+    } catch {
+      showError("Network error — please reload the page to try again");
+    }
+  }
+
+  // Links in account emails carry their token in the fragment (#verify=…),
+  // which never reaches the server or its logs. Read it, then drop it from the
+  // address bar so it isn't left in history or a shared screenshot.
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  history.replaceState(null, "", window.location.pathname + window.location.search);
+  if (hash.get("verify")) {
+    verifyEmail(hash.get("verify"));
+  } else if (hash.get("reset")) {
+    linkToken = hash.get("reset");
+    showView("reset");
+  } else if (hash.get("delete")) {
+    linkToken = hash.get("delete");
+    showView("delete");
+  } else if (hash.has("forgot")) {
+    showView("forgot");
+  } else if (localStorage.getItem("jwt_token")) {
+    // Already signed in: go to the app
+    window.location.replace("/");
+  }
 </script>
 </body>
 </html>
