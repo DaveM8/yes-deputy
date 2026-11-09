@@ -22,6 +22,7 @@ from app.database import (
     get_query_count,
     get_user_by_email,
     get_user_by_id,
+    peek_email_token,
     recent_token_count,
     set_email_verified,
     set_password,
@@ -91,6 +92,11 @@ class TokenRequest(BaseModel):
     token: str
 
 
+class VerifyRequest(BaseModel):
+    token: str
+    password: str
+
+
 class ResetRequest(BaseModel):
     token: str
     password: NewPassword
@@ -127,8 +133,14 @@ def register(body: RegisterRequest, background: BackgroundTasks) -> dict:
     if user is None:
         create_user(settings.db_path, body.email, password_hash)
         user = get_user_by_email(settings.db_path, body.email)
+    elif not user["email_verified"]:
+        # Nobody has proved they own this address yet, so the latest sign-up's
+        # password wins. Confirming the address then needs that password (see
+        # /verify), so someone who signed up with another person's address
+        # can't end up holding the account.
+        set_password(settings.db_path, user["id"], password_hash)
     # The same reply in every case, so registering can't reveal who has an account.
-    # An existing account's password is never changed here.
+    # A verified account's password is never changed here.
     if not user["email_verified"]:
         if token := _issue(user, "verify"):
             background.add_task(send_verification, user["email"], token)
@@ -138,10 +150,19 @@ def register(body: RegisterRequest, background: BackgroundTasks) -> dict:
 
 
 @router.post("/verify")
-def verify_email(body: TokenRequest, background: BackgroundTasks) -> dict:
-    user_id = consume_email_token(settings.db_path, body.token, "verify")
+def verify_email(body: VerifyRequest, background: BackgroundTasks) -> dict:
+    # The link proves the address; the password proves this is the person who
+    # chose it. Checked before the token is used up, so a typo doesn't waste the link.
+    user_id = peek_email_token(settings.db_path, body.token, "verify")
     user = get_user_by_id(settings.db_path, user_id) if user_id else None
     if not user:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, _INVALID_LINK)
+    if not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, (
+            "That password doesn't match. If you've forgotten it, or didn't sign up "
+            "yourself, use \"Forgot your password?\" to set a new one."
+        ))
+    if consume_email_token(settings.db_path, body.token, "verify") != user["id"]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, _INVALID_LINK)
     # The admin hears about a sign-up only once the address is shown to be real
     if set_email_verified(settings.db_path, user["id"]) and not user["is_approved"]:

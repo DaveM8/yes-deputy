@@ -211,6 +211,18 @@ def create_email_token(db_path: str, user_id: int, purpose: str, ttl: timedelta)
     return token
 
 
+def peek_email_token(db_path: str, token: str, purpose: str) -> int | None:
+    """A usable token's user_id, without using it up. None if unknown, used or expired."""
+    now = _utcnow().isoformat()
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT user_id FROM email_tokens "
+            "WHERE token_hash = ? AND purpose = ? AND used_at IS NULL AND expires_at > ?",
+            (_hash_token(token), purpose, now),
+        ).fetchone()
+        return row[0] if row else None
+
+
 def consume_email_token(db_path: str, token: str, purpose: str) -> int | None:
     """Use up a token. Returns its user_id, or None if it's unknown, used or expired."""
     now = _utcnow().isoformat()

@@ -75,6 +75,18 @@
       <button class="link-btn" type="button" data-view="login">Back to sign in</button>
     </form>
 
+    <!-- Opened from a confirmation email (#verify=token) -->
+    <form class="auth-form hidden" id="verify-form">
+      <p class="auth-note">To confirm your email address, enter the password you chose when you signed up.</p>
+      <div>
+        <label class="form-label" for="verify-password">Password</label>
+        <input class="form-input" id="verify-password" type="password"
+               placeholder="••••••••" autocomplete="current-password" required>
+      </div>
+      <button class="submit-btn" type="submit">Confirm email</button>
+      <button class="link-btn" type="button" data-view="forgot">Forgot your password?</button>
+    </form>
+
     <!-- Opened from a reset email (#reset=token) -->
     <form class="auth-form hidden" id="reset-form">
       <p class="auth-note">Choose a new password. Other devices will be signed out.</p>
@@ -104,8 +116,8 @@
 </div>
 
 <script>
-  const FORMS = ["login", "register", "forgot", "reset", "delete"];
-  // The token from an emailed link, for the reset and delete forms
+  const FORMS = ["login", "register", "forgot", "verify", "reset", "delete"];
+  // The token from an emailed link, for the verify, reset and delete forms
   let linkToken = null;
 
   function showView(which) {
@@ -261,21 +273,16 @@
     showNotice(data.message);
   });
 
-  async function verifyEmail(token) {
+  document.getElementById("verify-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const { ok, data } = await post("/api/auth/verify", {
+      token: linkToken,
+      password: document.getElementById("verify-password").value,
+    }, e.submitter, "Confirm email");
+    if (!ok) { showError(errorText(data)); return; }
     showView("login");
-    showNotice("Confirming your email address…");
-    try {
-      const resp = await fetch("/api/auth/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      });
-      const data = await resp.json().catch(() => ({}));
-      resp.ok ? showNotice(data.message) : showError(errorText(data));
-    } catch {
-      showError("Network error — please reload the page to try again");
-    }
-  }
+    showNotice(data.message);
+  });
 
   // Links in account emails carry their token in the fragment (#verify=…),
   // which never reaches the server or its logs. Read it, then drop it from the
@@ -283,7 +290,8 @@
   const hash = new URLSearchParams(window.location.hash.slice(1));
   history.replaceState(null, "", window.location.pathname + window.location.search);
   if (hash.get("verify")) {
-    verifyEmail(hash.get("verify"));
+    linkToken = hash.get("verify");
+    showView("verify");
   } else if (hash.get("reset")) {
     linkToken = hash.get("reset");
     showView("reset");
