@@ -137,11 +137,18 @@ def approve_user_by_id(db_path: str, user_id: int) -> bool:
         return cur.rowcount > 0
 
 
-def set_email_verified(db_path: str, user_id: int) -> bool:
-    """Mark a user's address as confirmed. Returns True if it wasn't already."""
+def set_email_verified(db_path: str, user_id: int, password_hash: str) -> bool:
+    """Mark a user's address as confirmed. Returns True if it wasn't already.
+
+    Only while the password is still `password_hash`, the one the caller
+    checked or set. A sign-up for an unconfirmed address replaces its
+    password, and one landing in between mustn't get confirmed with it.
+    """
     with _connect(db_path) as conn:
         cur = conn.execute(
-            "UPDATE users SET email_verified = 1 WHERE id = ? AND email_verified = 0", (user_id,)
+            "UPDATE users SET email_verified = 1 "
+            "WHERE id = ? AND email_verified = 0 AND password_hash = ?",
+            (user_id, password_hash),
         )
         return cur.rowcount > 0
 

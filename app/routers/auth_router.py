@@ -56,6 +56,10 @@ _CHECK_EMAIL = (
     "If it doesn't arrive within a few minutes, look in your spam folder."
 )
 _INVALID_LINK = "This link is invalid or has expired. Please request a new one."
+_RACED = (
+    "Your account changed while this was being processed. "
+    "Please use \"Forgot your password?\" to set your password and confirm your address."
+)
 
 
 def _clean_email(v: str) -> str:
@@ -164,8 +168,15 @@ def verify_email(body: VerifyRequest, background: BackgroundTasks) -> dict:
         ))
     if consume_email_token(settings.db_path, body.token, "verify") != user["id"]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, _INVALID_LINK)
+    if user["email_verified"]:
+        # Already confirmed, e.g. by a password reset
+        return {"message": "Email confirmed. You can now sign in."
+                if user["is_approved"] else "Email confirmed."}
+    if not set_email_verified(settings.db_path, user["id"], user["password_hash"]):
+        # Someone signed up with this address again while this request ran
+        raise HTTPException(status.HTTP_409_CONFLICT, _RACED)
     # The admin hears about a sign-up only once the address is shown to be real
-    if set_email_verified(settings.db_path, user["id"]) and not user["is_approved"]:
+    if not user["is_approved"]:
         background.add_task(notify_admin_new_user, user["email"])
     if user["is_approved"]:
         return {"message": "Email confirmed. You can now sign in."}
@@ -222,10 +233,15 @@ def reset_password(body: ResetRequest, background: BackgroundTasks) -> dict:
     user = get_user_by_id(settings.db_path, user_id) if user_id else None
     if not user:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, _INVALID_LINK)
-    set_password(settings.db_path, user["id"], hash_password(body.password))
+    password_hash = hash_password(body.password)
+    set_password(settings.db_path, user["id"], password_hash)
     # Following the link proves the address too
-    if set_email_verified(settings.db_path, user["id"]) and not user["is_approved"]:
-        background.add_task(notify_admin_new_user, user["email"])
+    if not user["email_verified"]:
+        if not set_email_verified(settings.db_path, user["id"], password_hash):
+            # Someone signed up with this address again while this request ran
+            raise HTTPException(status.HTTP_409_CONFLICT, _RACED)
+        if not user["is_approved"]:
+            background.add_task(notify_admin_new_user, user["email"])
     background.add_task(send_password_changed, user["email"])
     return {"message": "Your password has been changed. You can now sign in."}
 
