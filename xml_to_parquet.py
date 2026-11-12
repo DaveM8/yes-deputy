@@ -46,6 +46,10 @@ log = logging.getLogger(__name__)
 
 NS = {'akn': 'http://docs.oasis-open.org/legaldocml/ns/akn/3.0/CSD13'}
 
+# Roles of whoever is chairing (Ceann Comhairle, Leas-Cheann Comhairle,
+# An Cathaoirleach Gníomhach, Acting Chairman, ...)
+CHAIR_ROLE = re.compile(r'comhairle|cathaoirleach|chairman|chairperson|\bchair\b', re.I)
+
 
 def get_text(elem) -> str:
     return ' '.join(''.join(elem.itertext()).split())
@@ -161,8 +165,10 @@ def parse_written_answers(xml_path: str) -> list[dict]:
             continue
 
         # The answerer is the first speaker with a ministerial role ("as"). In
-        # oral questions the TD who asked usually speaks first, without one.
-        answerer       = next((s for s in speeches if s.get('as')), speeches[0])
+        # oral questions the TD who asked usually speaks first, without one,
+        # and the chair has a role but isn't answering.
+        answerer       = next((s for s in speeches if s.get('as')
+                               and not CHAIR_ROLE.search(resolve(s.get('as')))), speeches[0])
         answered_by    = resolve(answerer.get('by'))
         answering_role = resolve(answerer.get('as'))
 

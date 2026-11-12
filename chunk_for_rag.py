@@ -44,6 +44,11 @@ from lxml import etree
 # ─────────────────────────────────────────────
 
 NS            = {'akn': 'http://docs.oasis-open.org/legaldocml/ns/akn/3.0/CSD13'}
+
+# Roles of whoever is chairing (Ceann Comhairle, Leas-Cheann Comhairle,
+# An Cathaoirleach Gníomhach, Acting Chairman, ...)
+CHAIR_ROLE = re.compile(r'comhairle|cathaoirleach|chairman|chairperson|\bchair\b', re.I)
+
 XML_WORKERS   = 8
 DEFAULT_MAX_CHARS = 1500
 MIN_SPEECH_CHARS  = 200   # shorter speeches are merged into an exchange chunk
@@ -547,8 +552,10 @@ def process_xml(args: tuple) -> tuple[str, list[dict], str | None]:
             continue
 
         # The answerer is the first speaker with a ministerial role ("as"). In
-        # oral questions the TD who asked usually speaks first, without one.
-        answerer       = next((s for s in speeches if s.get('as')), speeches[0])
+        # oral questions the TD who asked usually speaks first, without one,
+        # and the chair has a role but isn't answering.
+        answerer       = next((s for s in speeches if s.get('as')
+                               and not CHAIR_ROLE.search(resolve(s.get('as')))), speeches[0])
         answered_by    = resolve(answerer.get('by'))
         answering_role = resolve(answerer.get('as'))
 
