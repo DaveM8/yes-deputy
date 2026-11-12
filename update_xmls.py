@@ -29,7 +29,8 @@ Usage
     python update_xmls.py --doc-types writtens debate  # both (default)
 
 Note: 404s on writtens are normal (not every sitting day has written answers
-published). 404s on debate are rare but handled gracefully.
+published). 404s on debate are rare but handled gracefully. Written answers
+that aren't out yet return 403; the next runs retry them (--recheck-days).
 """
 
 import asyncio
@@ -339,6 +340,12 @@ def main():
         help="Chamber to fetch: 'dail' (default) or 'seanad'",
     )
     parser.add_argument(
+        "--recheck-days",
+        type=int,
+        default=14,
+        help="Also re-check sitting days this far back for files missing last time (default: 14)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would be downloaded without saving anything",
@@ -362,8 +369,12 @@ def main():
         if latest is None:
             log.error(f"No {chamber} XML files found in {xml_dir}. Use --from-date to set a start date.")
             sys.exit(1)
-        after = latest
-        log.info(f"Latest {chamber} date in {xml_dir}: {latest}")
+        # Written answers are often published days after the sitting, so look
+        # back over recent days too. Files already on disk are skipped, so this
+        # only fetches what was missing last time.
+        after = min(latest, up_to - timedelta(days=args.recheck_days))
+        log.info(f"Latest {chamber} date in {xml_dir}: {latest}; "
+                 f"re-checking the last {args.recheck_days} days")
 
     log.info(f"Checking for new sitting days: {after + timedelta(days=1)} → {up_to}")
 

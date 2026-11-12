@@ -35,7 +35,8 @@ log "--- Step 1: Downloading Dáil debates ---"
 $PYTHON update_xmls.py --chamber dail 2>&1 | tee -a "$LOG_FILE"
 
 log "--- Step 1b: Downloading Seanad debates ---"
-$PYTHON update_xmls.py --chamber seanad 2>&1 | tee -a "$LOG_FILE"
+# The Seanad publishes no written answers
+$PYTHON update_xmls.py --chamber seanad --doc-types debate 2>&1 | tee -a "$LOG_FILE"
 
 log "--- Step 1c: Downloading committee debates ---"
 $PYTHON update_committees.py 2>&1 | tee -a "$LOG_FILE"

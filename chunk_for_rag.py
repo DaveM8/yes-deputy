@@ -546,8 +546,11 @@ def process_xml(args: tuple) -> tuple[str, list[dict], str | None]:
         if not speeches:
             continue
 
-        answered_by    = resolve(speeches[0].get('by'))
-        answering_role = resolve(speeches[0].get('as'))
+        # The answerer is the first speaker with a ministerial role ("as"). In
+        # oral questions the TD who asked usually speaks first, without one.
+        answerer       = next((s for s in speeches if s.get('as')), speeches[0])
+        answered_by    = resolve(answerer.get('by'))
+        answering_role = resolve(answerer.get('as'))
 
         roles = list(dict.fromkeys(
             resolve(q.get('to'))
