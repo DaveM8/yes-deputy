@@ -47,7 +47,7 @@ NS            = {'akn': 'http://docs.oasis-open.org/legaldocml/ns/akn/3.0/CSD13'
 
 # Roles of whoever is chairing (Ceann Comhairle, Leas-Cheann Comhairle,
 # An Cathaoirleach Gníomhach, Acting Chairman, ...)
-CHAIR_ROLE = re.compile(r'comhairle|cathaoirleach|chairman|chairperson|\bchair\b', re.I)
+CHAIR_ROLE = re.compile(r'comhairle|conhairle|cathaoirleach|chairman|chairperson|\bchair\b', re.I)
 
 XML_WORKERS   = 8
 DEFAULT_MAX_CHARS = 1500
