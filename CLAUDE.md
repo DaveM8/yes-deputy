@@ -252,12 +252,16 @@ The FastAPI app lives in `app/`. It serves a single-page frontend from `static/`
 - BYOK: callers can pass their own API key in `ChatRequest.api_key`; it is never stored. It is used only for the LLM call; retrieval always uses the server's OpenAI key. `_check_key_matches` rejects an Anthropic key (`sk-ant-`) on a non-Claude model and vice versa, before a query is reserved.
 
 ### Authentication model
-- New users register → `is_approved=0`; admin must approve before they can use the app
+- **Sign-up order:** register → the user confirms their address by an emailed link (`email_verified=1`) → only then is `ADMIN_EMAIL` notified → admin approves (`is_approved=1`) → the user gets an "approved" email. Login checks the password, then verification, then approval.
 - `is_admin=1` users access `/api/admin/*` routes and the `/admin` page
-- `app/email_service.py` sends registration notifications to `ADMIN_EMAIL` via SMTP
+- **Emailed links** (verify 48 h, reset and delete 1 h) are single-use tokens in the `email_tokens` table, stored only as sha256 hashes. The token travels in the URL fragment (`/login#reset=…`), so it never reaches nginx logs; `auth.html` POSTs it.
+- **Generic replies:** register, forgot-password and resend-verification don't reveal whether an address has an account. Each address gets at most 3 emails per purpose per hour.
+- **Revoking sessions:** JWTs carry `ver` = `users.token_version`, which goes up on every password reset or change, so older tokens get 401. Tokens without `ver` count as 0.
+- `/account` (`static/account.html`) changes the password (the response carries a fresh token for this device) and requests self-deletion, which is confirmed by an emailed link. Admins can't self-delete.
+- `app/email_service.py` holds the email text (`_render` builds HTML and plain text). Mail goes over SMTP (Brevo); a failure is logged, never raised. Links use `SITE_URL`.
 
 ### SQLite database (`data/users.db` by default)
-Two tables: `users` (auth + approval) and `query_log` (daily per-user count). `init_db()` is idempotent and handles the `is_approved` column migration for databases created before approval was added.
+Three tables: `users` (auth, approval, `email_verified`, `token_version`), `query_log` (daily per-user count) and `email_tokens` (hashed emailed-link tokens). `init_db()` is idempotent and adds missing columns. Users who existed before a column was added are treated as approved/verified.
 
 ### Static frontend (`static/`)
 Plain HTML/JS, no build step. `index.html` + `app.js` are the main research interface (SSE consumer for `/api/chat`); `auth.html` is login/register; `admin.html` is the user management panel (inline JS); `source.html` + `source.js` is the full-text page opened from a card's "Read full text ↗".
@@ -280,7 +284,7 @@ The chat endpoint streams Server-Sent Events in this order:
 # List all users (pending shown as PENDING in Approved column):
 .venv/bin/python manage.py users
 
-# Approve a pending user:
+# Approve a pending user (also emails them):
 .venv/bin/python manage.py approve user@example.com
 
 # Create the first admin account (bootstrapping):

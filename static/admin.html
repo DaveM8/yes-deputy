@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Yes Deputy — Admin</title>
-  <link rel="stylesheet" href="/static/style.css?v=4">
+  <link rel="stylesheet" href="/static/style.css?v=5">
   <style>
     /* Admin portal — overrides + additions */
     body { overflow: auto; height: auto; min-height: 100dvh; }
@@ -72,6 +72,7 @@
     .badge-pending  { background: #fef3c7; color: #92400e; }
     .badge-approved { background: var(--dail-bg);  color: var(--dail-green); }
     .badge-admin    { background: var(--accent-light); color: var(--accent); }
+    .badge-unverified { background: var(--bg); color: var(--text-muted); }
 
     /* ── Action buttons ── */
     .user-actions { display: flex; gap: 8px; flex-shrink: 0; }
@@ -216,6 +217,8 @@ function showToast(msg, isError = false) {
 
 function badge(user) {
   if (user.is_admin)    return '<span class="badge badge-admin">Admin</span>';
+  // Unverified sign-ups haven't confirmed their address yet; approval can wait for that
+  if (!user.email_verified) return '<span class="badge badge-unverified">Email unconfirmed</span>';
   if (!user.is_approved) return '<span class="badge badge-pending">Pending</span>';
   return '<span class="badge badge-approved">Approved</span>';
 }
@@ -260,7 +263,7 @@ function escHtml(s) {
 }
 
 function renderUsers(users) {
-  const pending = users.filter(u => !u.is_approved && !u.is_admin);
+  const pending = users.filter(u => !u.is_approved && !u.is_admin && u.email_verified);
   const all     = users;
 
   const pendingEl = document.getElementById('pending-list');
@@ -288,8 +291,8 @@ async function approveUser(id) {
   const btns = document.querySelectorAll(`#user-${id} .btn`);
   btns.forEach(b => b.disabled = true);
   try {
-    await apiFetch(`/api/admin/users/${id}/approve`, { method: 'POST' });
-    showToast('User approved.');
+    const res = await apiFetch(`/api/admin/users/${id}/approve`, { method: 'POST' });
+    showToast(res.emailed ? 'User approved, email sent.' : 'User approved.');
     await loadUsers();
   } catch (e) {
     showToast(e.message, true);

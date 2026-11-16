@@ -9,12 +9,14 @@ Usage:
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 
 # Load .env before importing settings
 from app.config import settings
 from app.database import approve_user, create_user, get_user_by_email, init_db, list_users
 from app.auth import hash_password
+from app.email_service import send_account_approved
 
 
 def cmd_users() -> None:
@@ -22,20 +24,30 @@ def cmd_users() -> None:
     if not users:
         print("No users found.")
         return
-    print(f"{'ID':<5} {'Email':<35} {'Created':<12} {'Admin':<6} {'Approved'}")
-    print("-" * 70)
+    print(f"{'ID':<5} {'Email':<35} {'Created':<12} {'Admin':<6} {'Verified':<9} {'Approved'}")
+    print("-" * 80)
     for u in users:
         admin  = "yes" if u["is_admin"]    else "no"
         approved = "yes" if u["is_approved"] else "PENDING"
-        print(f"{u['id']:<5} {u['email']:<35} {u['created_at']:<12} {admin:<6} {approved}")
+        verified = "yes" if u["email_verified"] else "no"
+        print(f"{u['id']:<5} {u['email']:<35} {u['created_at']:<12} {admin:<6} {verified:<9} {approved}")
 
 
 def cmd_approve(email: str) -> None:
-    if approve_user(settings.db_path, email):
-        print(f"Approved: {email}")
-    else:
+    user = get_user_by_email(settings.db_path, email)
+    if not user:
         print(f"User not found: {email}")
         sys.exit(1)
+    if not approve_user(settings.db_path, email):
+        print(f"Already approved: {email}")
+        return
+    print(f"Approved: {email}")
+    if not settings.smtp_host:
+        print("SMTP_HOST not set, so no approval email was sent")
+        return
+    # send_email logs failures rather than raising; see the app log for those
+    asyncio.run(send_account_approved(user["email"]))
+    print(f"Approval email sent to {user['email']}")
 
 
 def cmd_create_admin(email: str, password: str) -> None:
@@ -53,7 +65,8 @@ def cmd_create_admin(email: str, password: str) -> None:
     import sqlite3 as _sq
     conn = _sq.connect(settings.db_path)
     conn.execute(
-        "UPDATE users SET is_admin = 1, is_approved = 1 WHERE id = ?", (user_id,)
+        "UPDATE users SET is_admin = 1, is_approved = 1, email_verified = 1 WHERE id = ?",
+        (user_id,)
     )
     conn.commit()
     conn.close()
